@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:;" />
+    <title>WhatsApp Print Manager</title>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+
+    <!-- ════════════════ LOGIN / QR SCREEN ════════════════ -->
+    <div id="login-screen" class="screen active">
+        <div class="login-container">
+            <div class="logo">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#25D366" stroke-width="1.5"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path
+                        d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                </svg>
+                <h1>WhatsApp Print Manager</h1>
+                <p class="subtitle">Scan the QR code with your WhatsApp to get started</p>
+            </div>
+
+            <div id="qr-container" class="qr-box">
+                <div class="spinner"></div>
+                <p id="qr-status">Initializing WhatsApp connection...</p>
+                <img id="qr-image" class="qr-image hidden" alt="QR Code" />
+            </div>
+
+            <div id="loading-bar-container" class="hidden">
+                <div class="loading-bar">
+                    <div id="loading-bar-fill" class="loading-bar-fill"></div>
+                </div>
+                <p id="loading-text" class="loading-text">Loading...</p>
+            </div>
+
+            <button id="btn-reconnect" class="btn btn-secondary hidden">
+                🔄 Reconnect
+            </button>
+        </div>
+    </div>
+
+    <!-- ════════════════ MAIN APP SCREEN ════════════════ -->
+    <div id="main-screen" class="screen">
+
+        <!-- Top Bar -->
+        <header class="topbar">
+            <div class="topbar-left">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#25D366" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path
+                        d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                </svg>
+                <h2>Print Manager</h2>
+                <span id="connection-badge" class="badge badge-success">Connected</span>
+            </div>
+            <div class="topbar-right">
+                <button class="btn btn-icon" id="btn-refresh" title="Refresh chats">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M23 4v6h-6" />
+                        <path d="M1 20v-6h6" />
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                    </svg>
+                </button>
+                <button class="btn btn-icon" id="btn-open-folder" title="Open downloads folder">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                    </svg>
+                </button>
+                <select id="printer-select" class="printer-select" title="Select printer">
+                    <option value="">Default Printer</option>
+                </select>
+
+                <!-- Profile Section -->
+                <div class="profile-section" id="profile-section">
+                    <div class="profile-trigger" id="profile-trigger" title="Account">
+                        <div class="profile-avatar" id="profile-avatar">?</div>
+                    </div>
+                    <div class="profile-dropdown hidden" id="profile-dropdown">
+                        <div class="profile-dropdown-header">
+                            <div class="profile-dropdown-avatar" id="dropdown-avatar">?</div>
+                            <div class="profile-dropdown-info">
+                                <div class="profile-dropdown-name" id="profile-name">Loading...</div>
+                                <div class="profile-dropdown-number" id="profile-number"></div>
+                            </div>
+                        </div>
+                        <div class="profile-dropdown-divider"></div>
+                        <button class="profile-dropdown-item" id="btn-logout">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                                <polyline points="16 17 21 12 16 7" />
+                                <line x1="21" y1="12" x2="9" y2="12" />
+                            </svg>
+                            Logout
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div class="app-body">
+
+            <!-- Left Sidebar: Contact List -->
+            <aside class="sidebar" id="sidebar">
+                <div class="sidebar-header">
+                    <h3>Recent Chats</h3>
+                    <span id="chat-count" class="badge badge-count">0</span>
+                </div>
+                <div id="chat-list" class="chat-list">
+                    <div class="empty-state">
+                        <p>No recent chats</p>
+                        <button class="btn btn-small" id="btn-sidebar-refresh">Refresh</button>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main Content: File List -->
+            <main class="content" id="content">
+                <div id="no-chat-selected" class="empty-state-large">
+                    <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="1">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                    <h3>Select a chat to view files</h3>
+                    <p>Click on a contact from the sidebar to see their sent files</p>
+                </div>
+
+                <div id="files-section" class="hidden">
+                    <div class="files-header">
+                        <div class="files-header-left">
+                            <h3 id="selected-contact-name">Contact Name</h3>
+                            <span id="file-count" class="badge badge-count">0 files</span>
+                        </div>
+                        <div class="files-header-right">
+                            <button class="btn btn-small" id="btn-select-all">Select
+                                All</button>
+                            <button class="btn btn-small btn-warning" id="btn-download-unread">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="7 10 12 15 17 10" />
+                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                </svg>
+                                Download New
+                            </button>
+                            <button class="btn btn-small btn-accent" id="btn-download-all">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="7 10 12 15 17 10" />
+                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                </svg>
+                                Download All
+                            </button>
+                            <button class="btn btn-small btn-primary" id="btn-print-selected" disabled>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <polyline points="6 9 6 2 18 2 18 9" />
+                                    <path
+                                        d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                                    <rect x="6" y="14" width="12" height="8" />
+                                </svg>
+                                Print Selected
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="bulk-progress" class="bulk-progress hidden">
+                        <div class="progress-bar">
+                            <div id="bulk-progress-fill" class="progress-fill"></div>
+                        </div>
+                        <span id="bulk-progress-text">Downloading...</span>
+                    </div>
+
+                    <div id="file-list" class="file-list">
+                        <!-- Files will be populated here -->
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Floating Delete FAB -->
+    <button class="fab-delete hidden" id="fab-delete" title="Delete selected files">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            <line x1="10" y1="11" x2="10" y2="17" />
+            <line x1="14" y1="11" x2="14" y2="17" />
+        </svg>
+        <span id="fab-delete-count"></span>
+    </button>
+
+    <!-- Toast notifications -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="renderer.js"></script>
+</body>
+
+</html>
