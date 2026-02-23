@@ -69,8 +69,7 @@ function setupButtonListeners() {
     btnPrintSelected.addEventListener("click", () => printSelected());
 
   const fabDelete = document.getElementById("fab-delete");
-  if (fabDelete)
-    fabDelete.addEventListener("click", () => deleteSelected());
+  if (fabDelete) fabDelete.addEventListener("click", () => deleteSelected());
 
   // Sidebar initial refresh button
   const btnSidebarRefresh = document.getElementById("btn-sidebar-refresh");
@@ -236,7 +235,8 @@ async function refreshChats() {
   if (btnRefresh) btnRefresh.classList.add("spinning");
 
   // Only show spinner on first load (don't flash spinner on auto-refresh)
-  const isEmpty = chatList.children.length === 0 ||
+  const isEmpty =
+    chatList.children.length === 0 ||
     (chatList.children.length === 1 && chatList.querySelector(".empty-state"));
   if (isEmpty) {
     chatList.innerHTML = `
@@ -526,7 +526,8 @@ function toggleFileSelect(messageId) {
 function toggleSelectAll() {
   const btn = document.getElementById("btn-select-all");
   const downloadedFiles = currentFiles.filter((f) => f.isDownloaded);
-  const allCurrentlySelected = downloadedFiles.length > 0 &&
+  const allCurrentlySelected =
+    downloadedFiles.length > 0 &&
     downloadedFiles.every((f) => selectedFiles.has(f.messageId));
 
   if (allCurrentlySelected) {
@@ -548,7 +549,8 @@ function updateSelectAllButton() {
   const btn = document.getElementById("btn-select-all");
   if (!btn) return;
   const downloadedFiles = currentFiles.filter((f) => f.isDownloaded);
-  const allCurrentlySelected = downloadedFiles.length > 0 &&
+  const allCurrentlySelected =
+    downloadedFiles.length > 0 &&
     downloadedFiles.every((f) => selectedFiles.has(f.messageId));
   btn.textContent = allCurrentlySelected ? "Deselect All" : "Select All";
 }
@@ -566,7 +568,8 @@ function updatePrintButton() {
   if (fab) {
     if (selectedFiles.size > 0) {
       fab.classList.remove("hidden");
-      document.getElementById("fab-delete-count").textContent = selectedFiles.size;
+      document.getElementById("fab-delete-count").textContent =
+        selectedFiles.size;
     } else {
       fab.classList.add("hidden");
     }
