@@ -5,7 +5,77 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --dev"
+    "dev": "electron . --dev",
+    "generate-icons": "electron-icon-builder --input=src/icon.png --output=build --flatten",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build": "electron-builder --win --mac"
+  },
+  "build": {
+    "appId": "com.bookshop.whatsapp-print-manager",
+    "productName": "WhatsApp Print Manager",
+    "copyright": "Copyright © 2026 Bookshop",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "**/*",
+      "!.git/**",
+      "!.wwebjs_auth/**",
+      "!.wwebjs_cache/**",
+      "!downloads/**",
+      "!dist/**",
+      "!build/**",
+      "!*.md",
+      "!node_modules/sharp/**",
+      "!node_modules/electron-rebuild/**",
+      "!node_modules/electron-icon-builder/**"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/**/*.node",
+      "node_modules/puppeteer/**",
+      "node_modules/puppeteer-core/**",
+      "node_modules/whatsapp-web.js/node_modules/puppeteer/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icons/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icons/icon.ico",
+      "uninstallerIcon": "build/icons/icon.ico",
+      "installerHeaderIcon": "build/icons/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "WhatsApp Print Manager"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "build/icons/icon.icns",
+      "category": "public.app-category.utilities"
+    },
+    "dmg": {
+      "title": "WhatsApp Print Manager ${version}",
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    }
   },
   "keywords": [
     "whatsapp",
@@ -15,13 +85,15 @@
   "author": "Bookshop",
   "license": "MIT",
   "dependencies": {
-    "electron": "^28.0.0",
     "mime-types": "^2.1.35",
     "pdf-to-printer": "^5.6.0",
     "qrcode": "^1.5.3",
     "whatsapp-web.js": "^1.26.1-alpha.1"
   },
   "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^26.8.1",
+    "electron-icon-builder": "^2.0.1",
     "electron-rebuild": "^3.2.9",
     "sharp": "^0.34.5"
   }

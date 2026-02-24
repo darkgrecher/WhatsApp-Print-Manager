@@ -9,11 +9,17 @@ const mime = require("mime-types");
 let mainWindow;
 let whatsappClient;
 let isClientReady = false;
-const DOWNLOADS_DIR = path.join(__dirname, "downloads");
+let DOWNLOADS_DIR;
 
-// Ensure downloads directory exists
-if (!fs.existsSync(DOWNLOADS_DIR)) {
-  fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
+function getUserDataPath(...segments) {
+  return path.join(app.getPath("userData"), ...segments);
+}
+
+function ensureDownloadsDir() {
+  DOWNLOADS_DIR = getUserDataPath("downloads");
+  if (!fs.existsSync(DOWNLOADS_DIR)) {
+    fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
+  }
 }
 
 // ── Electron Window ──────────────────────────────────────────────────────────
@@ -45,7 +51,7 @@ function createWindow() {
 function initWhatsApp() {
   whatsappClient = new Client({
     authStrategy: new LocalAuth({
-      dataPath: path.join(__dirname, ".wwebjs_auth"),
+      dataPath: getUserDataPath(".wwebjs_auth"),
     }),
     puppeteer: {
       headless: true,
@@ -742,7 +748,7 @@ ipcMain.handle("logout-whatsapp", async () => {
   isClientReady = false;
 
   // Clear auth data so a new QR is shown
-  const authPath = path.join(__dirname, ".wwebjs_auth");
+  const authPath = getUserDataPath(".wwebjs_auth");
   try {
     fs.rmSync(authPath, { recursive: true, force: true });
   } catch (e) {
@@ -762,6 +768,7 @@ ipcMain.handle("logout-whatsapp", async () => {
 
 // ── App Lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
+  ensureDownloadsDir();
   createWindow();
   initWhatsApp();
 

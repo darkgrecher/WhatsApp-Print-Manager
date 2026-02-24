@@ -2,6 +2,7 @@ node_modules/
 .wwebjs_auth/
 .wwebjs_cache/
 downloads/
+dist/
 *.log
 .DS_Store
 Thumbs.db
