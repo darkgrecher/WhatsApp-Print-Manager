@@ -526,7 +526,9 @@ async function selectChat(chatId, chatName) {
   document.getElementById("btn-download-all").disabled = false;
 
   // Auto-select all unread files that are already downloaded
-  const unreadDownloaded = currentFiles.filter((f) => f.isUnread && f.isDownloaded);
+  const unreadDownloaded = currentFiles.filter(
+    (f) => f.isUnread && f.isDownloaded,
+  );
   if (unreadDownloaded.length > 0) {
     unreadDownloaded.forEach((f) => selectedFiles.add(f.messageId));
     showToast(
@@ -633,7 +635,11 @@ function renderFiles() {
   fileList.querySelectorAll(".file-item").forEach((el) => {
     el.addEventListener("click", (e) => {
       // Don't toggle if clicking on action buttons or checkbox
-      if (e.target.closest(".file-actions") || e.target.closest(".file-checkbox")) return;
+      if (
+        e.target.closest(".file-actions") ||
+        e.target.closest(".file-checkbox")
+      )
+        return;
 
       const msgId = el.dataset.messageId;
       const file = currentFiles.find((f) => f.messageId === msgId);
@@ -692,8 +698,7 @@ async function loadDocumentThumbnails() {
     try {
       const result = await window.api.generateThumbnail(file.localPath);
       if (result && result.thumbnailPath) {
-        const url =
-          "file:///" + result.thumbnailPath.replace(/\\/g, "/");
+        const url = "file:///" + result.thumbnailPath.replace(/\\/g, "/");
         iconEl.innerHTML = `<img class="file-thumbnail" src="${escapeHtml(url)}" alt="Preview" />`;
       }
     } catch (err) {
@@ -1233,7 +1238,11 @@ function formatDateLabel(timestamp) {
   if (date.getFullYear() === now.getFullYear()) {
     return date.toLocaleDateString("en-US", { month: "long", day: "numeric" });
   }
-  return date.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  return date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
 }
 
 function getDateKey(timestamp) {

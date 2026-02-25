@@ -200,7 +200,10 @@ function initWhatsApp(retryAttempt = 1) {
               finalFileName = `file_${Date.now()}.${ext2}`;
             }
             const safeMsgId = msg.id._serialized.replace(/[^a-zA-Z0-9]/g, "_");
-            const localPath = path.join(DOWNLOADS_DIR, `${safeMsgId}_${finalFileName}`);
+            const localPath = path.join(
+              DOWNLOADS_DIR,
+              `${safeMsgId}_${finalFileName}`,
+            );
             const buffer = Buffer.from(media.data, "base64");
             fs.writeFileSync(localPath, buffer);
             messageData.autoDownloaded = true;
@@ -973,7 +976,9 @@ if (!gotSingleLock) {
   app.on("before-quit", async () => {
     // Close thumbnail window if open
     if (thumbWindow && !thumbWindow.isDestroyed()) {
-      try { thumbWindow.close(); } catch (_) {}
+      try {
+        thumbWindow.close();
+      } catch (_) {}
       thumbWindow = null;
     }
     if (whatsappClient) {
