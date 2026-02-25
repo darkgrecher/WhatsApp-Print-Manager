@@ -5,7 +5,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:;" />
+        content="default-src 'self'; script-src 'self'; img-src 'self' data: https: file:; style-src 'self' 'unsafe-inline'; font-src 'self' data:;" />
     <title>WhatsApp Print Manager</title>
     <link rel="stylesheet" href="styles.css" />
 </head>
@@ -111,6 +111,18 @@
                     <h3>Recent Chats</h3>
                     <span id="chat-count" class="badge badge-count">0</span>
                 </div>
+                <div class="search-bar-container">
+                    <div class="search-bar">
+                        <svg class="search-bar-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"/>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                        <input type="text" id="chat-search" class="search-input" placeholder="Search or start new chat" />
+                        <button class="search-clear hidden" id="chat-search-clear" title="Clear search">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
+                    </div>
+                </div>
                 <div id="chat-list" class="chat-list">
                     <div class="empty-state">
                         <p>No recent chats</p>
@@ -135,6 +147,18 @@
                         <div class="files-header-left">
                             <h3 id="selected-contact-name">Contact Name</h3>
                             <span id="file-count" class="badge badge-count">0 files</span>
+                        </div>
+                        <div class="files-search-container">
+                            <div class="search-bar search-bar-files">
+                                <svg class="search-bar-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="11" cy="11" r="8"/>
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                                </svg>
+                                <input type="text" id="file-search" class="search-input" placeholder="Search files..." />
+                                <button class="search-clear hidden" id="file-search-clear" title="Clear search">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                </button>
+                            </div>
                         </div>
                         <div class="files-header-right">
                             <button class="btn btn-small" id="btn-select-all">Select

@@ -75,6 +75,39 @@ function setupButtonListeners() {
   const btnSidebarRefresh = document.getElementById("btn-sidebar-refresh");
   if (btnSidebarRefresh)
     btnSidebarRefresh.addEventListener("click", () => refreshChats());
+
+  // ── Search bars ──
+  const chatSearch = document.getElementById("chat-search");
+  const chatSearchClear = document.getElementById("chat-search-clear");
+  if (chatSearch) {
+    chatSearch.addEventListener("input", () => {
+      filterChats(chatSearch.value);
+      chatSearchClear.classList.toggle("hidden", chatSearch.value.length === 0);
+    });
+  }
+  if (chatSearchClear) {
+    chatSearchClear.addEventListener("click", () => {
+      chatSearch.value = "";
+      chatSearchClear.classList.add("hidden");
+      filterChats("");
+    });
+  }
+
+  const fileSearch = document.getElementById("file-search");
+  const fileSearchClear = document.getElementById("file-search-clear");
+  if (fileSearch) {
+    fileSearch.addEventListener("input", () => {
+      filterFiles(fileSearch.value);
+      fileSearchClear.classList.toggle("hidden", fileSearch.value.length === 0);
+    });
+  }
+  if (fileSearchClear) {
+    fileSearchClear.addEventListener("click", () => {
+      fileSearch.value = "";
+      fileSearchClear.classList.add("hidden");
+      filterFiles("");
+    });
+  }
 }
 
 function setupEventListeners() {
@@ -223,6 +256,84 @@ function stopAutoRefresh() {
 }
 
 // ── Chat List ────────────────────────────────────────────────────────────
+
+function filterChats(query) {
+  const chatItems = document.querySelectorAll(".chat-item");
+  const q = query.toLowerCase().trim();
+  let visibleCount = 0;
+
+  chatItems.forEach((el) => {
+    const name = (el.dataset.chatName || "").toLowerCase();
+    const number = (el.querySelector(".chat-number")?.textContent || "").toLowerCase();
+    const matches = !q || name.includes(q) || number.includes(q);
+    el.style.display = matches ? "" : "none";
+    if (matches) visibleCount++;
+  });
+
+  // Show/hide no-results message
+  const chatList = document.getElementById("chat-list");
+  let noResults = chatList.querySelector(".no-search-results");
+  if (visibleCount === 0 && q) {
+    if (!noResults) {
+      noResults = document.createElement("div");
+      noResults.className = "no-search-results";
+      noResults.innerHTML = `
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <p>No chats found</p>
+      `;
+      chatList.appendChild(noResults);
+    }
+  } else if (noResults) {
+    noResults.remove();
+  }
+}
+
+function filterFiles(query) {
+  const fileItems = document.querySelectorAll(".file-item");
+  const sectionHeaders = document.querySelectorAll(".file-section-header");
+  const q = query.toLowerCase().trim();
+  let visibleCount = 0;
+
+  fileItems.forEach((el) => {
+    const fileName = (el.querySelector(".file-name")?.textContent || "").toLowerCase();
+    const fileMeta = (el.querySelector(".file-meta")?.textContent || "").toLowerCase();
+    const matches = !q || fileName.includes(q) || fileMeta.includes(q);
+    el.style.display = matches ? "" : "none";
+    if (matches) visibleCount++;
+  });
+
+  // Hide section headers if no matching items beneath them
+  sectionHeaders.forEach((header) => {
+    let next = header.nextElementSibling;
+    let hasVisible = false;
+    while (next && !next.classList.contains("file-section-header")) {
+      if (next.classList.contains("file-item") && next.style.display !== "none") {
+        hasVisible = true;
+        break;
+      }
+      next = next.nextElementSibling;
+    }
+    header.style.display = hasVisible || !q ? "" : "none";
+  });
+
+  // Show/hide no-results message
+  const fileList = document.getElementById("file-list");
+  let noResults = fileList.querySelector(".no-search-results");
+  if (visibleCount === 0 && q) {
+    if (!noResults) {
+      noResults = document.createElement("div");
+      noResults.className = "no-search-results";
+      noResults.innerHTML = `
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <p>No files match your search</p>
+      `;
+      fileList.appendChild(noResults);
+    }
+  } else if (noResults) {
+    noResults.remove();
+  }
+}
+
 async function refreshChats() {
   if (isRefreshing) return; // prevent re-entrant calls
   isRefreshing = true;
@@ -337,6 +448,12 @@ async function selectChat(chatId, chatName) {
   currentChatId = chatId;
   selectedFiles.clear();
   updatePrintButton();
+
+  // Clear file search
+  const fileSearch = document.getElementById("file-search");
+  const fileSearchClear = document.getElementById("file-search-clear");
+  if (fileSearch) fileSearch.value = "";
+  if (fileSearchClear) fileSearchClear.classList.add("hidden");
 
   // Highlight active chat
   document.querySelectorAll(".chat-item").forEach((el) => {
@@ -1016,44 +1133,83 @@ function getFileIcon(file) {
   const type = (file.type || "").toLowerCase();
   const fileName = (file.fileName || "").toLowerCase();
 
-  if (mimeType.includes("pdf") || fileName.endsWith(".pdf")) {
-    return { class: "pdf", icon: "📄" };
+  // For downloaded images, show a thumbnail preview
+  const isImage = mimeType.includes("image") || type === "image" || /\.(jpg|jpeg|png|gif|bmp|webp|tiff?)$/i.test(fileName);
+  if (isImage && file.isDownloaded && file.localPath) {
+    const fileUrl = "file:///" + file.localPath.replace(/\\/g, "/");
+    return {
+      class: "image",
+      icon: `<img class="file-thumbnail" src="${escapeHtml(fileUrl)}" alt="Preview" onerror="this.outerHTML='<svg class=\\'file-type-svg\\' viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'currentColor\\' stroke-width=\\'1.5\\'><rect x=\\'3\\' y=\\'3\\' width=\\'18\\' height=\\'18\\' rx=\\'2\\'/><circle cx=\\'8.5\\' cy=\\'8.5\\' r=\\'1.5\\'/><path d=\\'M21 15l-5-5L5 21\\'/></svg>'" />`
+    };
   }
-  if (
-    mimeType.includes("image") ||
-    type === "image" ||
-    /\.(jpg|jpeg|png|gif|bmp|webp|tiff?)$/i.test(fileName)
-  ) {
-    return { class: "image", icon: "🖼️" };
+
+  // For downloaded videos, show a thumbnail-style icon
+  const isVideo = mimeType.includes("video") || type === "video";
+  if (isVideo && file.isDownloaded && file.localPath) {
+    return {
+      class: "video",
+      icon: `<svg class="file-type-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>`
+    };
+  }
+
+  if (mimeType.includes("pdf") || fileName.endsWith(".pdf")) {
+    return {
+      class: "pdf",
+      icon: `<svg class="file-type-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/></svg>`
+    };
+  }
+  if (isImage) {
+    return {
+      class: "image",
+      icon: `<svg class="file-type-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>`
+    };
   }
   if (
     mimeType.includes("word") ||
     mimeType.includes("document") ||
     /\.docx?$/i.test(fileName)
   ) {
-    return { class: "doc", icon: "📝" };
+    return {
+      class: "doc",
+      icon: `<svg class="file-type-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>`
+    };
   }
   if (
     mimeType.includes("excel") ||
     mimeType.includes("spreadsheet") ||
     /\.xlsx?$/i.test(fileName)
   ) {
-    return { class: "excel", icon: "📊" };
+    return {
+      class: "excel",
+      icon: `<svg class="file-type-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><rect x="8" y="12" width="8" height="6" rx="1"/><line x1="12" y1="12" x2="12" y2="18"/><line x1="8" y1="15" x2="16" y2="15"/></svg>`
+    };
   }
   if (
     mimeType.includes("presentation") ||
     mimeType.includes("powerpoint") ||
     /\.pptx?$/i.test(fileName)
   ) {
-    return { class: "ppt", icon: "📽️" };
+    return {
+      class: "ppt",
+      icon: `<svg class="file-type-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><rect x="8" y="11" width="8" height="7" rx="1"/></svg>`
+    };
   }
-  if (mimeType.includes("video") || type === "video") {
-    return { class: "video", icon: "🎬" };
+  if (isVideo) {
+    return {
+      class: "video",
+      icon: `<svg class="file-type-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>`
+    };
   }
   if (mimeType.includes("audio") || type === "audio" || type === "ptt") {
-    return { class: "audio", icon: "🎵" };
+    return {
+      class: "audio",
+      icon: `<svg class="file-type-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`
+    };
   }
-  return { class: "other", icon: "📎" };
+  return {
+    class: "other",
+    icon: `<svg class="file-type-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`
+  };
 }
 
 function formatTime(timestamp) {

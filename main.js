@@ -22,6 +22,48 @@ function ensureDownloadsDir() {
   }
 }
 
+// ── Cleanup helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Remove stale Chromium singleton lock files from the session directory.
+ * These can remain after a crash and prevent puppeteer from launching.
+ */
+function cleanupStaleLockFiles() {
+  const authPath = getUserDataPath(".wwebjs_auth");
+  if (!fs.existsSync(authPath)) return;
+
+  const lockNames = ["SingletonLock", "SingletonCookie", "SingletonSocket"];
+  const walk = (dir) => {
+    try {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(fullPath);
+        } else if (lockNames.includes(entry.name)) {
+          try {
+            fs.unlinkSync(fullPath);
+            console.log("[Cleanup] Removed stale lock:", fullPath);
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  };
+  walk(authPath);
+}
+
+/**
+ * Clear Electron's GPU disk-cache to avoid "Unable to move the cache" errors.
+ */
+function cleanupGpuCache() {
+  const gpuCachePath = path.join(app.getPath("userData"), "GPUCache");
+  try {
+    if (fs.existsSync(gpuCachePath)) {
+      fs.rmSync(gpuCachePath, { recursive: true, force: true });
+      console.log("[Cleanup] Cleared GPU cache");
+    }
+  } catch (_) {}
+}
+
 // ── Electron Window ──────────────────────────────────────────────────────────
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -48,7 +90,7 @@ function createWindow() {
 }
 
 // ── WhatsApp Client ──────────────────────────────────────────────────────────
-function initWhatsApp() {
+function initWhatsApp(retryAttempt = 1) {
   whatsappClient = new Client({
     authStrategy: new LocalAuth({
       dataPath: getUserDataPath(".wwebjs_auth"),
@@ -162,7 +204,28 @@ function initWhatsApp() {
     // of whatsapp-web.js fire message_create instead/additionally
   });
 
-  whatsappClient.initialize();
+  // Initialize with error handling and retry
+  const startClient = async (attempt = 1) => {
+    try {
+      await whatsappClient.initialize();
+    } catch (err) {
+      console.error(`[WhatsApp] Initialization failed (attempt ${attempt}):`, err.message);
+      if (attempt < 3) {
+        console.log("[WhatsApp] Cleaning up and retrying...");
+        try { await whatsappClient.destroy(); } catch (_) {}
+        cleanupStaleLockFiles();
+        // Re-create the client before retrying
+        initWhatsApp(attempt + 1);
+      } else {
+        mainWindow?.webContents.send("whatsapp:status", "error");
+        mainWindow?.webContents.send(
+          "whatsapp:error",
+          "Failed to start WhatsApp after multiple attempts. Please restart the app."
+        );
+      }
+    }
+  };
+  startClient(retryAttempt);
 }
 
 // ── IPC Handlers ─────────────────────────────────────────────────────────────
@@ -767,29 +830,46 @@ ipcMain.handle("logout-whatsapp", async () => {
 });
 
 // ── App Lifecycle ────────────────────────────────────────────────────────────
-app.whenReady().then(() => {
-  ensureDownloadsDir();
-  createWindow();
-  initWhatsApp();
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+// Prevent multiple instances of the app
+const gotSingleLock = app.requestSingleInstanceLock();
+if (!gotSingleLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    // Focus the existing window instead of opening a new one
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
   });
-});
 
-app.on("window-all-closed", async () => {
-  if (whatsappClient) {
-    try {
-      await whatsappClient.destroy();
-    } catch (e) {}
-  }
-  if (process.platform !== "darwin") app.quit();
-});
+  app.whenReady().then(() => {
+    cleanupGpuCache();
+    cleanupStaleLockFiles();
+    ensureDownloadsDir();
+    createWindow();
+    initWhatsApp();
 
-app.on("before-quit", async () => {
-  if (whatsappClient) {
-    try {
-      await whatsappClient.destroy();
-    } catch (e) {}
-  }
-});
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+
+  app.on("window-all-closed", async () => {
+    if (whatsappClient) {
+      try {
+        await whatsappClient.destroy();
+      } catch (e) {}
+    }
+    if (process.platform !== "darwin") app.quit();
+  });
+
+  app.on("before-quit", async () => {
+    if (whatsappClient) {
+      try {
+        await whatsappClient.destroy();
+      } catch (e) {}
+    }
+  });
+} // end of single-instance else block
