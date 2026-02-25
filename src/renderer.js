@@ -60,10 +60,6 @@ function setupButtonListeners() {
   if (btnDownloadAll)
     btnDownloadAll.addEventListener("click", () => downloadAllFiles());
 
-  const btnDownloadUnread = document.getElementById("btn-download-unread");
-  if (btnDownloadUnread)
-    btnDownloadUnread.addEventListener("click", () => downloadUnreadFiles());
-
   const btnPrintSelected = document.getElementById("btn-print-selected");
   if (btnPrintSelected)
     btnPrintSelected.addEventListener("click", () => printSelected());
@@ -325,6 +321,28 @@ function filterFiles(query) {
     header.style.display = hasVisible || !q ? "" : "none";
   });
 
+  // Hide date separators if no matching items beneath them
+  const dateSeparators = document.querySelectorAll(".date-separator");
+  dateSeparators.forEach((sep) => {
+    let next = sep.nextElementSibling;
+    let hasVisible = false;
+    while (
+      next &&
+      !next.classList.contains("date-separator") &&
+      !next.classList.contains("file-section-header")
+    ) {
+      if (
+        next.classList.contains("file-item") &&
+        next.style.display !== "none"
+      ) {
+        hasVisible = true;
+        break;
+      }
+      next = next.nextElementSibling;
+    }
+    sep.style.display = hasVisible || !q ? "" : "none";
+  });
+
   // Show/hide no-results message
   const fileList = document.getElementById("file-list");
   let noResults = fileList.querySelector(".no-search-results");
@@ -507,18 +525,18 @@ async function selectChat(chatId, chatName) {
 
   document.getElementById("btn-download-all").disabled = false;
 
-  // Count unread files
-  const unreadFiles = currentFiles.filter((f) => f.isUnread);
-  const btnDownloadUnread = document.getElementById("btn-download-unread");
-  if (btnDownloadUnread) {
-    btnDownloadUnread.disabled = unreadFiles.length === 0;
-    btnDownloadUnread.innerHTML = `
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-      Download New (${unreadFiles.length})
-    `;
+  // Auto-select all unread files that are already downloaded
+  const unreadDownloaded = currentFiles.filter((f) => f.isUnread && f.isDownloaded);
+  if (unreadDownloaded.length > 0) {
+    unreadDownloaded.forEach((f) => selectedFiles.add(f.messageId));
+    showToast(
+      `Auto-selected ${unreadDownloaded.length} new file(s). Unselect any you don't need.`,
+      "info",
+    );
   }
 
   renderFiles();
+  updatePrintButton();
 
   // Mark chat as read AFTER loading files (so unread tagging is accurate)
   window.api.markChatRead(chatId);
@@ -586,7 +604,7 @@ function renderFiles() {
       <span class="section-icon">🔔</span>
       <span>New Files (${unreadFiles.length})</span>
     </div>`;
-    html += unreadFiles.map(renderFileItem).join("");
+    html += renderFilesGroupedByDate(unreadFiles);
   }
 
   // Previously seen files section
@@ -597,7 +615,7 @@ function renderFiles() {
         <span>Previously Seen (${seenFiles.length})</span>
       </div>`;
     }
-    html += seenFiles.map(renderFileItem).join("");
+    html += renderFilesGroupedByDate(seenFiles);
   }
 
   fileList.innerHTML = html;
@@ -610,6 +628,25 @@ function renderFiles() {
       el.addEventListener("click", handleFileAction);
     }
   });
+
+  // Click anywhere on card to toggle selection
+  fileList.querySelectorAll(".file-item").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      // Don't toggle if clicking on action buttons or checkbox
+      if (e.target.closest(".file-actions") || e.target.closest(".file-checkbox")) return;
+
+      const msgId = el.dataset.messageId;
+      const file = currentFiles.find((f) => f.messageId === msgId);
+      if (file && file.isDownloaded) {
+        toggleFileSelect(msgId);
+        const checkbox = el.querySelector(".file-checkbox");
+        if (checkbox) checkbox.checked = selectedFiles.has(msgId);
+      }
+    });
+  });
+
+  // Load document thumbnails asynchronously
+  loadDocumentThumbnails();
 }
 
 function handleFileAction(e) {
@@ -629,6 +666,39 @@ function handleFileAction(e) {
     case "download-file":
       downloadSingleFile(el.dataset.msgId, el.dataset.filename);
       break;
+  }
+}
+
+// ── Document Thumbnail Loading ───────────────────────────────────────────
+async function loadDocumentThumbnails() {
+  const pdfFiles = currentFiles.filter((f) => {
+    const fn = (f.fileName || "").toLowerCase();
+    const mt = (f.mimeType || "").toLowerCase();
+    return (
+      f.isDownloaded &&
+      f.localPath &&
+      (fn.endsWith(".pdf") || mt.includes("pdf"))
+    );
+  });
+
+  for (const file of pdfFiles) {
+    const safeMsgId = file.messageId.replace(/[^a-zA-Z0-9]/g, "_");
+    const iconEl = document.querySelector(`#file-${safeMsgId} .file-icon`);
+    if (!iconEl) continue;
+
+    // Skip if already has a thumbnail image
+    if (iconEl.querySelector(".file-thumbnail")) continue;
+
+    try {
+      const result = await window.api.generateThumbnail(file.localPath);
+      if (result && result.thumbnailPath) {
+        const url =
+          "file:///" + result.thumbnailPath.replace(/\\/g, "/");
+        iconEl.innerHTML = `<img class="file-thumbnail" src="${escapeHtml(url)}" alt="Preview" />`;
+      }
+    } catch (err) {
+      console.error("Thumbnail load failed for", file.fileName, err);
+    }
   }
 }
 
@@ -776,86 +846,6 @@ async function downloadAllFiles() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
     Download All
   `;
-}
-
-async function downloadUnreadFiles() {
-  if (!currentChatId) return;
-
-  const unreadFiles = currentFiles.filter((f) => f.isUnread && !f.isDownloaded);
-  if (unreadFiles.length === 0) {
-    showToast("No new files to download", "info");
-    return;
-  }
-
-  const btn = document.getElementById("btn-download-unread");
-  btn.disabled = true;
-  btn.textContent = "Downloading...";
-
-  showToast(`Downloading ${unreadFiles.length} new file(s)...`, "info");
-
-  let successCount = 0;
-  let failCount = 0;
-
-  for (const file of unreadFiles) {
-    const result = await window.api.downloadFile({
-      messageId: file.messageId,
-      chatId: currentChatId,
-      fileName: file.fileName,
-    });
-
-    if (result.error) {
-      failCount++;
-    } else {
-      successCount++;
-      file.isDownloaded = true;
-      file.localPath = result.localPath;
-    }
-  }
-
-  renderFiles();
-
-  showToast(
-    `Downloaded ${successCount} new file(s)${failCount > 0 ? `, ${failCount} failed` : ""}`,
-    failCount > 0 ? "warning" : "success",
-  );
-
-  // Switch button to "Select All New" mode
-  btn.disabled = false;
-  btn.className = "btn btn-small btn-success";
-  btn.innerHTML = `✅ Select All New`;
-
-  // Replace click handler to select-all-new mode
-  btn.replaceWith(btn.cloneNode(true));
-  const newBtn = document.getElementById("btn-download-unread");
-  newBtn.addEventListener("click", () => selectAllNew());
-}
-
-function selectAllNew() {
-  // Select all unread (new) downloaded files
-  selectedFiles.clear();
-  currentFiles.forEach((f) => {
-    if (f.isUnread && f.isDownloaded) selectedFiles.add(f.messageId);
-  });
-
-  const count = selectedFiles.size;
-  showToast(`Selected ${count} new file(s)`, "info");
-
-  renderFiles();
-  updatePrintButton();
-
-  // Reset the button back to Download New mode
-  const btn = document.getElementById("btn-download-unread");
-  btn.className = "btn btn-small btn-warning";
-  const unreadCount = currentFiles.filter((f) => f.isUnread).length;
-  btn.innerHTML = `
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-    Download New (${unreadCount})
-  `;
-
-  // Restore original click handler
-  btn.replaceWith(btn.cloneNode(true));
-  const restoredBtn = document.getElementById("btn-download-unread");
-  restoredBtn.addEventListener("click", () => downloadUnreadFiles());
 }
 
 // ── Delete ───────────────────────────────────────────────────────────────
@@ -1222,6 +1212,52 @@ function getFileIcon(file) {
     class: "other",
     icon: `<svg class="file-type-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`,
   };
+}
+
+function formatDateLabel(timestamp) {
+  if (!timestamp) return "Unknown Date";
+  const date = new Date(timestamp * 1000);
+  const now = new Date();
+
+  // Strip time for day comparison
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((today - target) / 86400000);
+
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) {
+    return date.toLocaleDateString("en-US", { weekday: "long" });
+  }
+  // Same year — omit year
+  if (date.getFullYear() === now.getFullYear()) {
+    return date.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+  }
+  return date.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+}
+
+function getDateKey(timestamp) {
+  if (!timestamp) return "unknown";
+  const d = new Date(timestamp * 1000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function renderFilesGroupedByDate(files) {
+  // Group files by date
+  const groups = new Map();
+  for (const file of files) {
+    const key = getDateKey(file.timestamp);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(file);
+  }
+
+  let html = "";
+  for (const [, groupFiles] of groups) {
+    const label = formatDateLabel(groupFiles[0].timestamp);
+    html += `<div class="date-separator"><span class="date-separator-label">${escapeHtml(label)}</span></div>`;
+    html += groupFiles.map(renderFileItem).join("");
+  }
+  return html;
 }
 
 function formatTime(timestamp) {

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 const QRCode = require("qrcode");
 const mime = require("mime-types");
@@ -175,7 +176,7 @@ function initWhatsApp(retryAttempt = 1) {
         sender: contactName,
       };
 
-      // If message has media, gather file info
+      // If message has media, gather file info and auto-download
       if (msg.hasMedia) {
         messageData.fileName = msg._data?.fileName || null;
         messageData.mimeType = msg._data?.mimetype || null;
@@ -187,6 +188,27 @@ function initWhatsApp(retryAttempt = 1) {
               messageData.mimeType || "application/octet-stream",
             ) || "bin";
           messageData.fileName = `${msg.type || "file"}_${msg.timestamp}.${ext}`;
+        }
+
+        // Auto-download media without marking the chat as read
+        try {
+          const media = await msg.downloadMedia();
+          if (media) {
+            let finalFileName = messageData.fileName || media.filename;
+            if (!finalFileName) {
+              const ext2 = mime.extension(media.mimetype) || "bin";
+              finalFileName = `file_${Date.now()}.${ext2}`;
+            }
+            const safeMsgId = msg.id._serialized.replace(/[^a-zA-Z0-9]/g, "_");
+            const localPath = path.join(DOWNLOADS_DIR, `${safeMsgId}_${finalFileName}`);
+            const buffer = Buffer.from(media.data, "base64");
+            fs.writeFileSync(localPath, buffer);
+            messageData.autoDownloaded = true;
+            messageData.localPath = localPath;
+            console.log(`[WhatsApp] Auto-downloaded media: ${finalFileName}`);
+          }
+        } catch (dlErr) {
+          console.error("[WhatsApp] Auto-download failed:", dlErr.message);
         }
       }
 
@@ -834,6 +856,84 @@ ipcMain.handle("logout-whatsapp", async () => {
   return { success: true };
 });
 
+// ── Thumbnail Generation ─────────────────────────────────────────────────────
+let thumbWindow = null;
+let thumbBusy = false;
+const thumbQueue = [];
+
+function ensureThumbDir() {
+  const thumbDir = getUserDataPath("thumbnails");
+  if (!fs.existsSync(thumbDir)) fs.mkdirSync(thumbDir, { recursive: true });
+  return thumbDir;
+}
+
+ipcMain.handle("generate-thumbnail", async (event, filePath) => {
+  if (!filePath || !fs.existsSync(filePath)) return { error: "File not found" };
+
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext !== ".pdf") return { error: "Unsupported file type" };
+
+  const thumbDir = ensureThumbDir();
+  const stat = fs.statSync(filePath);
+  const hash = crypto
+    .createHash("md5")
+    .update(`${filePath}_${stat.size}_${stat.mtimeMs}`)
+    .digest("hex");
+  const thumbPath = path.join(thumbDir, hash + ".png");
+
+  if (fs.existsSync(thumbPath)) {
+    return { thumbnailPath: thumbPath };
+  }
+
+  return new Promise((resolve) => {
+    thumbQueue.push({ filePath, thumbPath, resolve });
+    processThumbQueue();
+  });
+});
+
+async function processThumbQueue() {
+  if (thumbBusy || thumbQueue.length === 0) return;
+  thumbBusy = true;
+
+  const { filePath, thumbPath, resolve } = thumbQueue.shift();
+
+  try {
+    if (!thumbWindow || thumbWindow.isDestroyed()) {
+      thumbWindow = new BrowserWindow({
+        width: 200,
+        height: 260,
+        show: false,
+        webPreferences: {
+          plugins: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+        },
+      });
+    }
+
+    const fileUrl =
+      "file:///" +
+      filePath.replace(/\\/g, "/") +
+      "#toolbar=0&navpanes=0&scrollbar=0&view=Fit";
+    await thumbWindow.loadURL(fileUrl);
+
+    // Wait for PDF to render
+    await new Promise((r) => setTimeout(r, 2500));
+
+    const image = await thumbWindow.webContents.capturePage();
+    const resized = image.resize({ width: 200 });
+    fs.writeFileSync(thumbPath, resized.toPNG());
+
+    resolve({ thumbnailPath: thumbPath });
+  } catch (err) {
+    console.error("Thumbnail generation error:", err);
+    resolve({ error: err.message });
+  }
+
+  thumbBusy = false;
+  processThumbQueue();
+}
+
 // ── App Lifecycle ────────────────────────────────────────────────────────────
 
 // Prevent multiple instances of the app
@@ -871,6 +971,11 @@ if (!gotSingleLock) {
   });
 
   app.on("before-quit", async () => {
+    // Close thumbnail window if open
+    if (thumbWindow && !thumbWindow.isDestroyed()) {
+      try { thumbWindow.close(); } catch (_) {}
+      thumbWindow = null;
+    }
     if (whatsappClient) {
       try {
         await whatsappClient.destroy();

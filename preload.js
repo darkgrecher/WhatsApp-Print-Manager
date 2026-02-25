@@ -39,4 +39,6 @@ contextBridge.exposeInMainWorld("api", {
   openDownloadsFolder: () => ipcRenderer.invoke("open-downloads-folder"),
   openFile: (filePath) => ipcRenderer.invoke("open-file", filePath),
   deleteFiles: (data) => ipcRenderer.invoke("delete-files", data),
+  generateThumbnail: (filePath) =>
+    ipcRenderer.invoke("generate-thumbnail", filePath),
 });
