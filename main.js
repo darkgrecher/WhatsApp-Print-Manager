@@ -209,10 +209,15 @@ function initWhatsApp(retryAttempt = 1) {
     try {
       await whatsappClient.initialize();
     } catch (err) {
-      console.error(`[WhatsApp] Initialization failed (attempt ${attempt}):`, err.message);
+      console.error(
+        `[WhatsApp] Initialization failed (attempt ${attempt}):`,
+        err.message,
+      );
       if (attempt < 3) {
         console.log("[WhatsApp] Cleaning up and retrying...");
-        try { await whatsappClient.destroy(); } catch (_) {}
+        try {
+          await whatsappClient.destroy();
+        } catch (_) {}
         cleanupStaleLockFiles();
         // Re-create the client before retrying
         initWhatsApp(attempt + 1);
@@ -220,7 +225,7 @@ function initWhatsApp(retryAttempt = 1) {
         mainWindow?.webContents.send("whatsapp:status", "error");
         mainWindow?.webContents.send(
           "whatsapp:error",
-          "Failed to start WhatsApp after multiple attempts. Please restart the app."
+          "Failed to start WhatsApp after multiple attempts. Please restart the app.",
         );
       }
     }
