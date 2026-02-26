@@ -155,9 +155,13 @@ function setupEventListeners() {
           const spinner = document.querySelector(".spinner");
           if (qrImg) qrImg.classList.add("hidden");
           if (spinner) spinner.style.display = "";
-          if (qrStatus) qrStatus.textContent = "Session expired. Reconnecting...";
+          if (qrStatus)
+            qrStatus.textContent = "Session expired. Reconnecting...";
         }
-        showToast("Session expired, reconnecting with fresh session...", "info");
+        showToast(
+          "Session expired, reconnecting with fresh session...",
+          "info",
+        );
         break;
       case "logged_out":
         switchToLoginScreen();

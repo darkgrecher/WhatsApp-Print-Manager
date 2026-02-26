@@ -245,7 +245,9 @@ function initWhatsApp(retryAttempt = 1) {
     let eventReceived = false;
     // Guard against both timeout and catch block trying to retry
     let retryTriggered = false;
-    const markEventReceived = () => { eventReceived = true; };
+    const markEventReceived = () => {
+      eventReceived = true;
+    };
 
     // Listen for key events that indicate successful progress
     whatsappClient.once("qr", markEventReceived);
