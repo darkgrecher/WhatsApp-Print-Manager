@@ -96,6 +96,16 @@ function initWhatsApp(retryAttempt = 1) {
     authStrategy: new LocalAuth({
       dataPath: getUserDataPath(".wwebjs_auth"),
     }),
+    // Use a user agent that matches the actual Chromium version bundled with
+    // puppeteer.  A mismatch (e.g. declaring Chrome/101 while running Chrome/145)
+    // makes WhatsApp reject QR-code linking with "Couldn't link device".
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    // Always fetch the latest WhatsApp Web version instead of relying on a
+    // potentially stale local cache.
+    webVersionCache: {
+      type: "none",
+    },
     puppeteer: {
       headless: true,
       args: [
@@ -229,22 +239,44 @@ function initWhatsApp(retryAttempt = 1) {
     // of whatsapp-web.js fire message_create instead/additionally
   });
 
-  // Initialize with error handling and retry
+  // Initialize with error handling, timeout detection, and retry
   const startClient = async (attempt = 1) => {
-    try {
-      await whatsappClient.initialize();
-    } catch (err) {
-      console.error(
-        `[WhatsApp] Initialization failed (attempt ${attempt}):`,
-        err.message,
-      );
+    // Track whether any meaningful event has fired during init
+    let eventReceived = false;
+    // Guard against both timeout and catch block trying to retry
+    let retryTriggered = false;
+    const markEventReceived = () => { eventReceived = true; };
+
+    // Listen for key events that indicate successful progress
+    whatsappClient.once("qr", markEventReceived);
+    whatsappClient.once("authenticated", markEventReceived);
+    whatsappClient.once("ready", markEventReceived);
+    whatsappClient.once("auth_failure", markEventReceived);
+
+    const doRetry = async (reason) => {
+      if (retryTriggered) return; // prevent double-retry
+      retryTriggered = true;
+
+      try {
+        await whatsappClient.destroy();
+      } catch (_) {}
+
+      // Give the browser process time to fully exit
+      await new Promise((r) => setTimeout(r, 2000));
+
       if (attempt < 3) {
-        console.log("[WhatsApp] Cleaning up and retrying...");
-        try {
-          await whatsappClient.destroy();
-        } catch (_) {}
+        // Clear stale auth data so a fresh QR code can be generated
+        if (!eventReceived) {
+          const authPath = getUserDataPath(".wwebjs_auth");
+          try {
+            fs.rmSync(authPath, { recursive: true, force: true });
+            console.log("[WhatsApp] Cleared stale auth data");
+          } catch (_) {}
+        }
+
         cleanupStaleLockFiles();
-        // Re-create the client before retrying
+        console.log(`[WhatsApp] Retrying (${reason})...`);
+        mainWindow?.webContents.send("whatsapp:status", "retrying");
         initWhatsApp(attempt + 1);
       } else {
         mainWindow?.webContents.send("whatsapp:status", "error");
@@ -253,6 +285,30 @@ function initWhatsApp(retryAttempt = 1) {
           "Failed to start WhatsApp after multiple attempts. Please restart the app.",
         );
       }
+    };
+
+    // Set an initialization timeout – if no events fire within 45 seconds,
+    // the session data is likely stale and causing a silent hang.
+    const INIT_TIMEOUT_MS = 45000;
+    const initTimer = setTimeout(async () => {
+      if (!eventReceived) {
+        console.warn(
+          `[WhatsApp] No events received after ${INIT_TIMEOUT_MS / 1000}s (attempt ${attempt}) – session may be stale`,
+        );
+        await doRetry("stale session timeout");
+      }
+    }, INIT_TIMEOUT_MS);
+
+    try {
+      await whatsappClient.initialize();
+      clearTimeout(initTimer);
+    } catch (err) {
+      clearTimeout(initTimer);
+      console.error(
+        `[WhatsApp] Initialization failed (attempt ${attempt}):`,
+        err.message,
+      );
+      await doRetry("init error");
     }
   };
   startClient(retryAttempt);

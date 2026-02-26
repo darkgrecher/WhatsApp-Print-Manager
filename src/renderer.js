@@ -148,6 +148,17 @@ function setupEventListeners() {
         showToast("Authentication failed. Please try again.", "error");
         document.getElementById("btn-reconnect").classList.remove("hidden");
         break;
+      case "retrying":
+        {
+          const qrImg = document.getElementById("qr-image");
+          const qrStatus = document.getElementById("qr-status");
+          const spinner = document.querySelector(".spinner");
+          if (qrImg) qrImg.classList.add("hidden");
+          if (spinner) spinner.style.display = "";
+          if (qrStatus) qrStatus.textContent = "Session expired. Reconnecting...";
+        }
+        showToast("Session expired, reconnecting with fresh session...", "info");
+        break;
       case "logged_out":
         switchToLoginScreen();
         showToast("Logged out successfully", "info");
