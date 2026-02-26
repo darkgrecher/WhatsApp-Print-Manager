@@ -56,10 +56,6 @@ function setupButtonListeners() {
   if (btnSelectAll)
     btnSelectAll.addEventListener("click", () => toggleSelectAll());
 
-  const btnDownloadAll = document.getElementById("btn-download-all");
-  if (btnDownloadAll)
-    btnDownloadAll.addEventListener("click", () => downloadAllFiles());
-
   const btnPrintSelected = document.getElementById("btn-print-selected");
   if (btnPrintSelected)
     btnPrintSelected.addEventListener("click", () => printSelected());
@@ -414,8 +410,8 @@ async function refreshChats() {
   if (chats.length === 0) {
     chatList.innerHTML = `
       <div class="empty-state">
-        <p>No recent chats found</p>
-        <p style="font-size:12px;color:#999;margin-top:4px">Send a message to this WhatsApp number and it will appear here</p>
+        <p>No chats found</p>
+        <p style="font-size:12px;color:#999;margin-top:4px">Make sure WhatsApp is connected and has chats</p>
         <button class="btn btn-small" id="btn-refresh-empty" style="margin-top:8px">Refresh</button>
       </div>
     `;
@@ -519,11 +515,8 @@ async function selectChat(chatId, chatName) {
         <p>No media files found in this chat</p>
       </div>
     `;
-    document.getElementById("btn-download-all").disabled = true;
     return;
   }
-
-  document.getElementById("btn-download-all").disabled = false;
 
   // Auto-select all unread files that are already downloaded
   const unreadDownloaded = currentFiles.filter(
@@ -806,53 +799,6 @@ async function downloadSingleFile(messageId, fileName) {
   renderFiles();
 }
 
-async function downloadAllFiles() {
-  if (!currentChatId) return;
-
-  const btn = document.getElementById("btn-download-all");
-  btn.disabled = true;
-  btn.textContent = "Downloading...";
-
-  showToast("Starting bulk download...", "info");
-
-  const result = await window.api.downloadAllFiles(currentChatId);
-
-  if (result.error) {
-    showToast(`Bulk download error: ${result.error}`, "error");
-    btn.disabled = false;
-    btn.innerHTML = `⬇️ Download All`;
-    return;
-  }
-
-  const results = result.results || [];
-  const successCount = results.filter((r) => r.success).length;
-  const failCount = results.filter((r) => r.error).length;
-
-  // Update local file state
-  results.forEach((r) => {
-    if (r.success) {
-      const file = currentFiles.find((f) => f.messageId === r.messageId);
-      if (file) {
-        file.isDownloaded = true;
-        file.localPath = r.localPath;
-      }
-    }
-  });
-
-  renderFiles();
-
-  showToast(
-    `Downloaded ${successCount} files${failCount > 0 ? `, ${failCount} failed` : ""}`,
-    failCount > 0 ? "warning" : "success",
-  );
-
-  btn.disabled = false;
-  btn.innerHTML = `
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-    Download All
-  `;
-}
-
 // ── Delete ───────────────────────────────────────────────────────────────
 async function deleteSelected() {
   if (selectedFiles.size === 0) return;
@@ -951,13 +897,16 @@ async function printSelected() {
 
   const printerName = document.getElementById("printer-select").value;
 
-  showToast(`Sending ${filePaths.length} file(s) to printer...`, "info");
+  showToast(
+    `Opening printer setup for ${filePaths.length} file(s)...`,
+    "info",
+  );
 
-  let result;
-  if (printerName) {
-    result = await window.api.printToPrinter({ filePaths, printerName });
-  } else {
-    result = await window.api.printFiles(filePaths);
+  const result = await window.api.printWithSetup({ filePaths, printerName });
+
+  if (result.error) {
+    showToast(`Print error: ${result.error}`, "error");
+    return;
   }
 
   if (result.results) {
@@ -972,16 +921,16 @@ async function printSelected() {
 
 async function printSingleFile(filePath) {
   const printerName = document.getElementById("printer-select").value;
-  showToast("Sending to printer...", "info");
+  showToast("Opening printer setup...", "info");
 
-  let result;
-  if (printerName) {
-    result = await window.api.printToPrinter({
-      filePaths: [filePath],
-      printerName,
-    });
-  } else {
-    result = await window.api.printFiles([filePath]);
+  const result = await window.api.printWithSetup({
+    filePaths: [filePath],
+    printerName,
+  });
+
+  if (result.error) {
+    showToast(`Print error: ${result.error}`, "error");
+    return;
   }
 
   if (result.results && result.results[0]) {
@@ -1304,6 +1253,23 @@ function getInitials(name) {
     .map((w) => w[0])
     .join("")
     .toUpperCase();
+}
+
+/**
+ * Format a phone number for display.
+ * Simply adds a '+' prefix to the raw international number.
+ * e.g. "94771234567" → "+94771234567"
+ */
+function formatPhoneNumber(number) {
+  if (!number) return "";
+  // If it's a group ID or contains '@', return as-is
+  if (number.includes("@") || number.includes("-")) return number;
+  // Strip any non-digit characters
+  const digits = number.replace(/\D/g, "");
+  if (digits.length > 0) {
+    return "+" + digits;
+  }
+  return number;
 }
 
 function escapeHtml(str) {

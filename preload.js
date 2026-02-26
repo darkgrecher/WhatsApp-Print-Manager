@@ -31,8 +31,7 @@ contextBridge.exposeInMainWorld("api", {
   logoutWhatsApp: () => ipcRenderer.invoke("logout-whatsapp"),
 
   // ── Print Actions ──
-  printFiles: (filePaths) => ipcRenderer.invoke("print-files", filePaths),
-  printToPrinter: (data) => ipcRenderer.invoke("print-to-printer", data),
+  printWithSetup: (data) => ipcRenderer.invoke("print-with-setup", data),
   getPrinters: () => ipcRenderer.invoke("get-printers"),
 
   // ── File Actions ──

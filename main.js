@@ -260,59 +260,84 @@ function initWhatsApp(retryAttempt = 1) {
 
 // ── IPC Handlers ─────────────────────────────────────────────────────────────
 
-// Get all chats with unread messages
+/**
+ * Utility: run a promise with a timeout. Resolves to fallback on timeout.
+ */
+function withTimeout(promise, ms, fallback = null) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
+// Get all chats
 ipcMain.handle("get-unread-chats", async () => {
   if (!isClientReady) return { error: "WhatsApp not ready" };
 
   try {
-    const chats = await whatsappClient.getChats();
-    // Show ALL recent chats (not just unread), because WhatsApp Web
-    // often auto-marks messages as read when the puppeteer session loads.
-    // Filter: show chats with unread OR recent activity (last 24 hours)
-    const oneDayAgo = Math.floor(Date.now() / 1000) - 86400;
-    const recentChats = chats.filter((chat) => {
-      return (
-        chat.unreadCount > 0 || (chat.timestamp && chat.timestamp > oneDayAgo)
-      );
-    });
+    const chats = await withTimeout(whatsappClient.getChats(), 30000, []);
+    if (!chats || chats.length === 0) return { chats: [] };
 
-    const result = [];
-    for (const chat of recentChats) {
-      let contactName = chat.name || "Unknown";
-      let contactNumber = chat.id.user || chat.id._serialized;
-      let profilePicUrl = null;
+    // Show ALL chats (excluding status@broadcast)
+    const allChats = chats
+      .filter((c) => c.id._serialized !== "status@broadcast")
+      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
-      try {
-        const contact = await chat.getContact();
-        contactName =
-          contact.pushname || contact.name || contact.number || contactName;
-        profilePicUrl = await contact.getProfilePicUrl();
-      } catch (e) {
-        // Profile pic might not be available
-      }
+    // Process all chats in parallel with individual timeouts
+    const result = await Promise.all(
+      allChats.map(async (chat) => {
+        let contactNumber = chat.id.user || chat.id._serialized;
+        // savedName = name from phone contacts or chat name
+        let savedName = chat.name || "";
+        // whatsappName = pushname set by the user on WhatsApp
+        let whatsappName = "";
+        let profilePicUrl = null;
 
-      // Get last message preview
-      let lastMessage = "";
-      try {
-        const msgs = await chat.fetchMessages({ limit: 1 });
-        if (msgs.length > 0) {
-          lastMessage = msgs[0].hasMedia
-            ? `[${msgs[0].type}]`
-            : (msgs[0].body || "").substring(0, 50);
+        try {
+          const contact = await withTimeout(chat.getContact(), 5000, null);
+          if (contact) {
+            whatsappName = contact.pushname || "";
+            // If savedName is empty or just the number, try contact.name
+            if (!savedName || savedName === contactNumber) {
+              savedName = contact.name || "";
+            }
+            profilePicUrl = await withTimeout(contact.getProfilePicUrl(), 3000, null);
+          }
+        } catch (e) {
+          // Contact info not available, continue with defaults
         }
-      } catch (e) {}
 
-      result.push({
-        id: chat.id._serialized,
-        name: contactName,
-        number: contactNumber,
-        unreadCount: chat.unreadCount,
-        isGroup: chat.isGroup,
-        profilePicUrl: profilePicUrl || null,
-        timestamp: chat.timestamp,
-        lastMessage,
-      });
-    }
+        // Get last message preview (with timeout)
+        let lastMessage = "";
+        try {
+          const msgs = await withTimeout(
+            chat.fetchMessages({ limit: 1 }),
+            3000,
+            [],
+          );
+          if (msgs && msgs.length > 0) {
+            lastMessage = msgs[0].hasMedia
+              ? `[${msgs[0].type}]`
+              : (msgs[0].body || "").substring(0, 50);
+          }
+        } catch (e) {}
+
+        // Determine a display name (fallback chain)
+        const displayName = savedName || whatsappName || contactNumber;
+
+        return {
+          id: chat.id._serialized,
+          name: displayName,
+          number: contactNumber,
+          whatsappName: whatsappName,
+          unreadCount: chat.unreadCount,
+          isGroup: chat.isGroup,
+          profilePicUrl: profilePicUrl || null,
+          timestamp: chat.timestamp,
+          lastMessage,
+        };
+      }),
+    );
 
     // Sort by most recent first
     result.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -580,45 +605,127 @@ ipcMain.handle("download-all-files", async (event, chatId) => {
   }
 });
 
-// Print files
-ipcMain.handle("print-files", async (event, filePaths) => {
-  const results = [];
+// Print files with printer driver setup dialog
+ipcMain.handle(
+  "print-with-setup",
+  async (event, { filePaths, printerName }) => {
+    const { exec } = require("child_process");
+    const results = [];
 
-  for (const filePath of filePaths) {
-    try {
-      if (!fs.existsSync(filePath)) {
-        results.push({ filePath, error: "File not found" });
-        continue;
-      }
-
-      const ext = path.extname(filePath).toLowerCase();
-      const isPDF = ext === ".pdf";
-
-      if (isPDF) {
-        // Use pdf-to-printer for PDFs
-        const ptp = require("pdf-to-printer");
-        await ptp.print(filePath);
-        results.push({ filePath, success: true, method: "pdf-to-printer" });
-      } else {
-        // Use Windows shell "print" verb for other files (images, docs, etc.)
-        const { exec } = require("child_process");
-        await new Promise((resolve, reject) => {
-          // Use PowerShell Start-Process with -Verb Print
-          const cmd = `powershell -Command "Start-Process -FilePath '${filePath.replace(/'/g, "''")}' -Verb Print"`;
-          exec(cmd, (error, stdout, stderr) => {
-            if (error) reject(error);
-            else resolve(stdout);
-          });
+    // Resolve the actual printer name (if empty, find Windows default)
+    let targetPrinter = printerName;
+    if (!targetPrinter) {
+      try {
+        targetPrinter = await new Promise((resolve, reject) => {
+          exec(
+            'powershell -Command "(Get-CimInstance Win32_Printer | Where-Object Default -eq $true).Name"',
+            (err, stdout) => {
+              if (err) reject(err);
+              else resolve(stdout.trim());
+            },
+          );
         });
-        results.push({ filePath, success: true, method: "shell-print" });
+      } catch (e) {
+        console.error("Could not detect default printer:", e);
+        return { error: "No printer selected and could not detect default printer" };
       }
-    } catch (err) {
-      console.error(`Error printing ${filePath}:`, err);
-      results.push({ filePath, error: err.message });
     }
-  }
 
-  return { results };
+    if (!targetPrinter) {
+      return { error: "No printer available" };
+    }
+
+    // Step 1: Open the printer driver's Printing Preferences dialog
+    // This lets the user set color/BW, quality, paper size, orientation, pages per sheet, etc.
+    try {
+      console.log(`[Print] Opening preferences for printer: ${targetPrinter}`);
+      await new Promise((resolve, reject) => {
+        // printui /e opens "Printing Preferences" for the named printer
+        const cmd = `printui /e /n "${targetPrinter.replace(/"/g, '\\"')}"  `;
+        exec(cmd, (error) => {
+          // printui exits when the user closes the dialog (OK or Cancel)
+          if (error) {
+            console.error("[Print] Preferences dialog error:", error.message);
+          }
+          // We proceed to print regardless — user may have clicked OK or Cancel
+          resolve();
+        });
+      });
+    } catch (e) {
+      console.error("[Print] Failed to open preferences:", e);
+    }
+
+    // Step 2: Print each file to the selected printer with the configured preferences
+    for (const filePath of filePaths) {
+      try {
+        if (!fs.existsSync(filePath)) {
+          results.push({ filePath, error: "File not found" });
+          continue;
+        }
+
+        const ext = path.extname(filePath).toLowerCase();
+        const isPDF = ext === ".pdf";
+        const imageExts = [
+          ".jpg", ".jpeg", ".png", ".bmp", ".gif",
+          ".tiff", ".tif", ".webp",
+        ];
+        const isImage = imageExts.includes(ext);
+
+        if (isPDF) {
+          // Use pdf-to-printer (SumatraPDF) to print to the selected printer
+          const ptp = require("pdf-to-printer");
+          await ptp.print(filePath, { printer: targetPrinter });
+          results.push({ filePath, success: true, method: "pdf-to-printer" });
+        } else if (isImage) {
+          // Use PowerShell to print images to the specific printer
+          await new Promise((resolve, reject) => {
+            const escapedPath = filePath.replace(/'/g, "''");
+            const escapedPrinter = targetPrinter.replace(/'/g, "''");
+            const cmd = `powershell -Command "Start-Process mspaint.exe -ArgumentList '/pt','${escapedPath}','${escapedPrinter}' -Wait"`;
+            exec(cmd, (error) => {
+              if (error) reject(error);
+              else resolve();
+            });
+          });
+          results.push({ filePath, success: true, method: "mspaint-print" });
+        } else {
+          // For other file types (DOCX, PPTX, etc.), open with default app
+          shell.openPath(filePath);
+          results.push({ filePath, success: true, method: "default-app" });
+        }
+      } catch (err) {
+        console.error(`[Print] Error printing ${filePath}:`, err);
+        results.push({ filePath, error: err.message });
+      }
+    }
+
+    return { results };
+  },
+);
+
+// Get available printers
+ipcMain.handle("get-printers", async () => {
+  try {
+    const { exec } = require("child_process");
+    const printers = await new Promise((resolve, reject) => {
+      exec(
+        'powershell -Command "Get-CimInstance Win32_Printer | Select-Object -ExpandProperty Name"',
+        (err, stdout) => {
+          if (err) reject(err);
+          else {
+            const names = stdout
+              .split("\n")
+              .map((s) => s.trim())
+              .filter(Boolean);
+            resolve(names.map((name) => ({ name })));
+          }
+        },
+      );
+    });
+    return { printers };
+  } catch (err) {
+    return { error: err.message, printers: [] };
+  }
 });
 
 // Open downloads folder
@@ -690,78 +797,7 @@ ipcMain.handle(
   },
 );
 
-// Get available printers
-ipcMain.handle("get-printers", async () => {
-  try {
-    const ptp = require("pdf-to-printer");
-    const printers = await ptp.getPrinters();
-    return { printers };
-  } catch (err) {
-    return { error: err.message, printers: [] };
-  }
-});
-
-// Print to a specific printer
-ipcMain.handle(
-  "print-to-printer",
-  async (event, { filePaths, printerName }) => {
-    const results = [];
-
-    for (const filePath of filePaths) {
-      try {
-        if (!fs.existsSync(filePath)) {
-          results.push({ filePath, error: "File not found" });
-          continue;
-        }
-
-        const ext = path.extname(filePath).toLowerCase();
-        const isPDF = ext === ".pdf";
-
-        if (isPDF) {
-          const ptp = require("pdf-to-printer");
-          const options = printerName ? { printer: printerName } : {};
-          await ptp.print(filePath, options);
-          results.push({ filePath, success: true });
-        } else {
-          // For non-PDF files, use PowerShell with printer specification
-          const { exec } = require("child_process");
-          await new Promise((resolve, reject) => {
-            let cmd;
-            if (printerName) {
-              // Use rundll32 for images to a specific printer
-              if (
-                [
-                  ".jpg",
-                  ".jpeg",
-                  ".png",
-                  ".bmp",
-                  ".gif",
-                  ".tiff",
-                  ".tif",
-                ].includes(ext)
-              ) {
-                cmd = `powershell -Command "rundll32 shimgvw.dll,ImageView_PrintTo '${filePath.replace(/'/g, "''")}' '${printerName.replace(/'/g, "''")}'"`;
-              } else {
-                cmd = `powershell -Command "Start-Process -FilePath '${filePath.replace(/'/g, "''")}' -Verb Print"`;
-              }
-            } else {
-              cmd = `powershell -Command "Start-Process -FilePath '${filePath.replace(/'/g, "''")}' -Verb Print"`;
-            }
-            exec(cmd, (error, stdout, stderr) => {
-              if (error) reject(error);
-              else resolve(stdout);
-            });
-          });
-          results.push({ filePath, success: true });
-        }
-      } catch (err) {
-        results.push({ filePath, error: err.message });
-      }
-    }
-
-    return { results };
-  },
-);
+// (Printer selection is now handled by the OS print dialog – see print-with-dialog handler)
 
 // Mark chat as read
 ipcMain.handle("mark-chat-read", async (event, chatId) => {
