@@ -897,10 +897,7 @@ async function printSelected() {
 
   const printerName = document.getElementById("printer-select").value;
 
-  showToast(
-    `Opening printer setup for ${filePaths.length} file(s)...`,
-    "info",
-  );
+  showToast(`Opening printer setup for ${filePaths.length} file(s)...`, "info");
 
   const result = await window.api.printWithSetup({ filePaths, printerName });
 

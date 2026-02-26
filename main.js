@@ -301,7 +301,11 @@ ipcMain.handle("get-unread-chats", async () => {
             if (!savedName || savedName === contactNumber) {
               savedName = contact.name || "";
             }
-            profilePicUrl = await withTimeout(contact.getProfilePicUrl(), 3000, null);
+            profilePicUrl = await withTimeout(
+              contact.getProfilePicUrl(),
+              3000,
+              null,
+            );
           }
         } catch (e) {
           // Contact info not available, continue with defaults
@@ -627,7 +631,9 @@ ipcMain.handle(
         });
       } catch (e) {
         console.error("Could not detect default printer:", e);
-        return { error: "No printer selected and could not detect default printer" };
+        return {
+          error: "No printer selected and could not detect default printer",
+        };
       }
     }
 
@@ -666,8 +672,14 @@ ipcMain.handle(
         const ext = path.extname(filePath).toLowerCase();
         const isPDF = ext === ".pdf";
         const imageExts = [
-          ".jpg", ".jpeg", ".png", ".bmp", ".gif",
-          ".tiff", ".tif", ".webp",
+          ".jpg",
+          ".jpeg",
+          ".png",
+          ".bmp",
+          ".gif",
+          ".tiff",
+          ".tif",
+          ".webp",
         ];
         const isImage = imageExts.includes(ext);
 
