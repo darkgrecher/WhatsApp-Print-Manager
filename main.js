@@ -466,9 +466,7 @@ ipcMain.handle("get-unread-chats", async () => {
     const isDetached =
       err && err.message && err.message.includes("detached Frame");
     if (isDetached) {
-      console.warn(
-        "[get-unread-chats] Skipping refresh due to detached frame",
-      );
+      console.warn("[get-unread-chats] Skipping refresh due to detached frame");
       return { chats: [], skipped: true };
     }
     console.error("Error getting unread chats:", err);
