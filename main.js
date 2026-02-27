@@ -320,8 +320,13 @@ function initWhatsApp(retryAttempt = 1) {
 
 /**
  * Utility: run a promise with a timeout. Resolves to fallback on timeout.
+ * Attaches a no-op catch to the original promise so that if the timeout wins
+ * and the promise later rejects (e.g. "detached Frame"), the rejection is
+ * silently handled instead of crashing the process.
  */
 function withTimeout(promise, ms, fallback = null) {
+  // Prevent unhandled rejection when timeout wins and promise rejects later
+  promise.catch(() => {});
   return Promise.race([
     promise,
     new Promise((resolve) => setTimeout(() => resolve(fallback), ms)),
@@ -1043,6 +1048,25 @@ async function processThumbQueue() {
   thumbBusy = false;
   processThumbQueue();
 }
+
+// ── Global error handlers ────────────────────────────────────────────────────
+// Prevent the app from crashing on transient puppeteer / whatsapp-web.js errors
+// such as "Attempted to use detached Frame" which can occur when WhatsApp Web
+// internally navigates while background operations are in-flight.
+process.on("unhandledRejection", (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.error("[UnhandledRejection]", msg);
+});
+
+process.on("uncaughtException", (err) => {
+  // Let truly fatal errors (like out-of-memory) still crash
+  if (err.message && err.message.includes("detached Frame")) {
+    console.error("[UncaughtException] Suppressed detached-frame error:", err.message);
+    return;
+  }
+  console.error("[UncaughtException]", err);
+  throw err;
+});
 
 // ── App Lifecycle ────────────────────────────────────────────────────────────
 
