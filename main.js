@@ -333,12 +333,65 @@ function withTimeout(promise, ms, fallback = null) {
   ]);
 }
 
+/**
+ * Wait until the puppeteer page inside whatsapp-web.js is usable again
+ * (i.e. its main frame is no longer detached after an internal navigation).
+ * Polls with 500ms intervals up to `timeoutMs`.
+ */
+async function waitForPageReady(timeoutMs = 25000) {
+  const page = whatsappClient?.pupPage;
+  if (!page) return;
+
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      await page.evaluate(() => true);
+      return; // page is usable
+    } catch (e) {
+      if (e.message && e.message.includes("detached Frame")) {
+        await new Promise((r) => setTimeout(r, 500));
+      } else {
+        return; // different error — let the caller deal with it
+      }
+    }
+  }
+  // timeout — let the caller try and get the real error
+}
+
+/**
+ * Retry helper for whatsapp-web.js operations that may fail with transient
+ * "detached Frame" errors when WhatsApp Web internally navigates.
+ * On a detached frame, waits for the page to become usable before retrying.
+ * @param {() => Promise} fn  – factory that creates the promise (called each attempt)
+ * @param {number} retries    – max retry attempts (default 3)
+ */
+async function retryOnDetachedFrame(fn, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const isDetached =
+        err && err.message && err.message.includes("detached Frame");
+      if (isDetached && attempt < retries) {
+        console.warn(
+          `[Retry] Detached frame on attempt ${attempt}/${retries}, waiting for page to recover...`,
+        );
+        await waitForPageReady();
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
 // Get all chats
 ipcMain.handle("get-unread-chats", async () => {
   if (!isClientReady) return { error: "WhatsApp not ready" };
 
   try {
-    const chats = await withTimeout(whatsappClient.getChats(), 30000, []);
+    const chats = await retryOnDetachedFrame(() =>
+      withTimeout(whatsappClient.getChats(), 30000, []),
+    );
     if (!chats || chats.length === 0) return { chats: [] };
 
     // Show ALL chats (excluding status@broadcast)
@@ -410,6 +463,14 @@ ipcMain.handle("get-unread-chats", async () => {
     result.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
     return { chats: result };
   } catch (err) {
+    const isDetached =
+      err && err.message && err.message.includes("detached Frame");
+    if (isDetached) {
+      console.warn(
+        "[get-unread-chats] Skipping refresh due to detached frame",
+      );
+      return { chats: [], skipped: true };
+    }
     console.error("Error getting unread chats:", err);
     return { error: err.message };
   }
@@ -420,7 +481,7 @@ ipcMain.handle("get-all-chats", async (event, { limit = 30 } = {}) => {
   if (!isClientReady) return { error: "WhatsApp not ready" };
 
   try {
-    const chats = await whatsappClient.getChats();
+    const chats = await retryOnDetachedFrame(() => whatsappClient.getChats());
     const sorted = chats
       .filter((c) => c.id._serialized !== "status@broadcast")
       .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
@@ -458,10 +519,14 @@ ipcMain.handle("get-chat-files", async (event, chatId) => {
   if (!isClientReady) return { error: "WhatsApp not ready" };
 
   try {
-    const chat = await whatsappClient.getChatById(chatId);
+    const chat = await retryOnDetachedFrame(() =>
+      whatsappClient.getChatById(chatId),
+    );
     const unreadCount = chat.unreadCount || 0;
     // Fetch messages (limit to last 50 for performance)
-    const messages = await chat.fetchMessages({ limit: 50 });
+    const messages = await retryOnDetachedFrame(() =>
+      chat.fetchMessages({ limit: 50 }),
+    );
 
     // Determine which messages are unread:
     // The last `unreadCount` messages (sorted by time ascending) are unread
@@ -552,8 +617,12 @@ ipcMain.handle(
     if (!isClientReady) return { error: "WhatsApp not ready" };
 
     try {
-      const chat = await whatsappClient.getChatById(chatId);
-      const messages = await chat.fetchMessages({ limit: 100 });
+      const chat = await retryOnDetachedFrame(() =>
+        whatsappClient.getChatById(chatId),
+      );
+      const messages = await retryOnDetachedFrame(() =>
+        chat.fetchMessages({ limit: 100 }),
+      );
       const msg = messages.find((m) => m.id._serialized === messageId);
 
       if (!msg) return { error: "Message not found" };
@@ -611,8 +680,12 @@ ipcMain.handle("download-all-files", async (event, chatId) => {
   if (!isClientReady) return { error: "WhatsApp not ready" };
 
   try {
-    const chat = await whatsappClient.getChatById(chatId);
-    const messages = await chat.fetchMessages({ limit: 100 });
+    const chat = await retryOnDetachedFrame(() =>
+      whatsappClient.getChatById(chatId),
+    );
+    const messages = await retryOnDetachedFrame(() =>
+      chat.fetchMessages({ limit: 100 }),
+    );
     const mediaMessages = messages.filter((m) => m.hasMedia);
 
     const results = [];
@@ -843,8 +916,12 @@ ipcMain.handle(
     const waResults = [];
     if (isClientReady && chatId && messageIds && messageIds.length > 0) {
       try {
-        const chat = await whatsappClient.getChatById(chatId);
-        const messages = await chat.fetchMessages({ limit: 100 });
+        const chat = await retryOnDetachedFrame(() =>
+          whatsappClient.getChatById(chatId),
+        );
+        const messages = await retryOnDetachedFrame(() =>
+          chat.fetchMessages({ limit: 100 }),
+        );
 
         for (const msgId of messageIds) {
           try {
@@ -879,8 +956,10 @@ ipcMain.handle(
 ipcMain.handle("mark-chat-read", async (event, chatId) => {
   if (!isClientReady) return { error: "WhatsApp not ready" };
   try {
-    const chat = await whatsappClient.getChatById(chatId);
-    await chat.sendSeen();
+    const chat = await retryOnDetachedFrame(() =>
+      whatsappClient.getChatById(chatId),
+    );
+    await retryOnDetachedFrame(() => chat.sendSeen());
     return { success: true };
   } catch (err) {
     return { error: err.message };

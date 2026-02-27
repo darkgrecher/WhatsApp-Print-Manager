@@ -431,6 +431,9 @@ async function refreshChats() {
   isRefreshing = false;
 
   if (result.error) {
+    // Only show error UI if there are no chats already displayed
+    // (i.e. don't replace a working list with an error on transient failure)
+    if (!isEmpty) return;
     chatList.innerHTML = `
       <div class="empty-state">
         <p>Error: ${result.error}</p>
@@ -442,6 +445,9 @@ async function refreshChats() {
       .addEventListener("click", () => refreshChats());
     return;
   }
+
+  // If the backend skipped due to a transient error, keep existing list
+  if (result.skipped && !isEmpty) return;
 
   const chats = result.chats || [];
   chatCount.textContent = chats.length;
