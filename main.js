@@ -671,7 +671,7 @@ ipcMain.handle("download-all-files", async (event, chatId) => {
 ipcMain.handle(
   "print-with-setup",
   async (event, { filePaths, printerName }) => {
-    const { exec } = require("child_process");
+    const { exec, execFile } = require("child_process");
     const results = [];
 
     // Resolve the actual printer name (if empty, find Windows default)
@@ -747,12 +747,9 @@ ipcMain.handle(
           await ptp.print(filePath, { printer: targetPrinter });
           results.push({ filePath, success: true, method: "pdf-to-printer" });
         } else if (isImage) {
-          // Use PowerShell to print images to the specific printer
+          // Use mspaint to print images to the specific printer
           await new Promise((resolve, reject) => {
-            const escapedPath = filePath.replace(/'/g, "''");
-            const escapedPrinter = targetPrinter.replace(/'/g, "''");
-            const cmd = `powershell -Command "Start-Process mspaint.exe -ArgumentList '/pt','${escapedPath}','${escapedPrinter}' -Wait"`;
-            exec(cmd, (error) => {
+            execFile("mspaint.exe", ["/pt", filePath, targetPrinter], (error) => {
               if (error) reject(error);
               else resolve();
             });
