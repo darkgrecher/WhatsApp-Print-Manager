@@ -1061,7 +1061,10 @@ process.on("unhandledRejection", (reason) => {
 process.on("uncaughtException", (err) => {
   // Let truly fatal errors (like out-of-memory) still crash
   if (err.message && err.message.includes("detached Frame")) {
-    console.error("[UncaughtException] Suppressed detached-frame error:", err.message);
+    console.error(
+      "[UncaughtException] Suppressed detached-frame error:",
+      err.message,
+    );
     return;
   }
   console.error("[UncaughtException]", err);
