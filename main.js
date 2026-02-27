@@ -749,10 +749,14 @@ ipcMain.handle(
         } else if (isImage) {
           // Use mspaint to print images to the specific printer
           await new Promise((resolve, reject) => {
-            execFile("mspaint.exe", ["/pt", filePath, targetPrinter], (error) => {
-              if (error) reject(error);
-              else resolve();
-            });
+            execFile(
+              "mspaint.exe",
+              ["/pt", filePath, targetPrinter],
+              (error) => {
+                if (error) reject(error);
+                else resolve();
+              },
+            );
           });
           results.push({ filePath, success: true, method: "mspaint-print" });
         } else {
