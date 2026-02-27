@@ -15,6 +15,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupEventListeners();
   setupButtonListeners();
   loadPrinters();
+  setupNetworkListeners();
 });
 
 function setupButtonListeners() {
@@ -259,6 +260,29 @@ function stopAutoRefresh() {
   if (autoRefreshTimer) {
     clearInterval(autoRefreshTimer);
     autoRefreshTimer = null;
+  }
+}
+
+// ── Network (online / offline) monitoring ────────────────────────────────
+function setupNetworkListeners() {
+  window.addEventListener("online", updateConnectionBadge);
+  window.addEventListener("offline", updateConnectionBadge);
+}
+
+function updateConnectionBadge() {
+  const badge = document.getElementById("connection-badge");
+  if (!badge) return;
+
+  if (navigator.onLine) {
+    badge.textContent = "Connected";
+    badge.className = "badge badge-success";
+    badge.style.background = "";
+    badge.style.color = "";
+  } else {
+    badge.textContent = "Disconnected";
+    badge.className = "badge";
+    badge.style.background = "#dc2626";
+    badge.style.color = "white";
   }
 }
 
