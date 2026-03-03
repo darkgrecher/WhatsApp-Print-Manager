@@ -21,6 +21,8 @@ dist/
 admin-portal/backend/dist/
 
 # ── Next.js frontend build output ─────────────────────────
+admin-portal/.next/
+admin-portal/out/
 admin-portal/frontend/.next/
 admin-portal/frontend/out/
 

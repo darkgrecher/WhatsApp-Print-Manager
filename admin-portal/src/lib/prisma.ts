@@ -6,4 +6,6 @@ export const prisma =
   globalForPrisma.prisma ||
   new PrismaClient();
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+// Cache the client on globalThis to avoid exhausting connections in both
+// development (HMR) and production (serverless warm containers).
+globalForPrisma.prisma = prisma;
