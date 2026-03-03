@@ -78,6 +78,10 @@
                 <button id="btn-request-trial" class="btn btn-primary btn-large">
                     🚀 Request Trial Version
                 </button>
+                <div id="admin-contact-no-plan" class="admin-contact-info hidden">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                    <span>Contact Admin: <strong class="admin-contact-number"></strong></span>
+                </div>
             </div>
 
             <!-- Pending approval -->
@@ -91,6 +95,10 @@
                 <p class="license-message">Your trial request has been submitted!</p>
                 <p class="license-sub-message">Please wait for an administrator to activate your account. This usually takes a few minutes.</p>
                 <button id="btn-check-again" class="btn btn-secondary">🔄 Check Again</button>
+                <div id="admin-contact-pending" class="admin-contact-info hidden">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                    <span>Contact Admin: <strong class="admin-contact-number"></strong></span>
+                </div>
             </div>
 
             <!-- Expired -->
@@ -105,6 +113,10 @@
                 <p class="license-message">Your plan has expired.</p>
                 <p class="license-sub-message">Please contact the administrator to renew your subscription.</p>
                 <button id="btn-check-again-expired" class="btn btn-secondary">🔄 Check Again</button>
+                <div id="admin-contact-expired" class="admin-contact-info hidden">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                    <span>Contact Admin: <strong class="admin-contact-number"></strong></span>
+                </div>
             </div>
 
             <!-- Rejected -->
@@ -119,6 +131,10 @@
                 <p class="license-message">Your request has been rejected.</p>
                 <p class="license-sub-message">Please contact the administrator for more information.</p>
                 <button id="btn-check-again-rejected" class="btn btn-secondary">🔄 Check Again</button>
+                <div id="admin-contact-rejected" class="admin-contact-info hidden">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                    <span>Contact Admin: <strong class="admin-contact-number"></strong></span>
+                </div>
             </div>
 
             <!-- Error connecting to license server -->
@@ -203,6 +219,10 @@
                             <div class="plan-info-row">
                                 <span class="plan-info-label">Days Left</span>
                                 <span class="plan-info-value plan-days-left" id="plan-days-left">—</span>
+                            </div>
+                            <div id="profile-admin-contact" class="plan-info-row hidden">
+                                <span class="plan-info-label">Admin Contact</span>
+                                <span class="plan-info-value admin-contact-number" id="profile-admin-number">—</span>
                             </div>
                         </div>
                         <div class="profile-dropdown-divider"></div>

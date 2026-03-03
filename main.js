@@ -986,6 +986,19 @@ ipcMain.handle("get-whatsapp-status", async () => {
   return { ready: isClientReady };
 });
 
+// ── Admin Contact ────────────────────────────────────────────────────────────
+ipcMain.handle("get-admin-contact", async () => {
+  try {
+    const response = await fetch(`${LICENSE_API_URL}/settings/admin_contact_number`);
+    if (!response.ok) return { number: null };
+    const data = await response.json();
+    return { number: data.value || null };
+  } catch (err) {
+    console.error("[Settings] Failed to fetch admin contact:", err.message);
+    return { number: null };
+  }
+});
+
 // ── License Validation ───────────────────────────────────────────────────────
 ipcMain.handle("check-license", async (_, phoneNumber) => {
   try {

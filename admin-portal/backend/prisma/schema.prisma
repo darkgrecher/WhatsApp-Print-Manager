@@ -33,3 +33,10 @@ enum PlanType {
   TRIAL
   ANNUAL
 }
+
+model Setting {
+  key   String @id
+  value String
+
+  @@map("settings")
+}

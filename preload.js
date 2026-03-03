@@ -45,4 +45,7 @@ contextBridge.exposeInMainWorld("api", {
   checkLicense: (phoneNumber) =>
     ipcRenderer.invoke("check-license", phoneNumber),
   requestTrial: (data) => ipcRenderer.invoke("request-trial", data),
+
+  // ── Settings ──
+  getAdminContact: () => ipcRenderer.invoke("get-admin-contact"),
 });

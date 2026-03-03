@@ -232,6 +232,31 @@ body {
   opacity: 1;
 }
 
+/* Admin contact info (shown on license screens) */
+.admin-contact-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 10px 16px;
+  background: rgba(37, 211, 102, 0.08);
+  border: 1px solid rgba(37, 211, 102, 0.2);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.admin-contact-info.hidden {
+  display: none;
+}
+.admin-contact-info svg {
+  flex-shrink: 0;
+  stroke: var(--wa-green);
+}
+.admin-contact-number {
+  color: var(--wa-green);
+  font-weight: 600;
+}
+
 /* ── Top Bar ─────────────────────────────────────────────────────────────── */
 .topbar {
   display: flex;

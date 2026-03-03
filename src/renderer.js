@@ -362,6 +362,11 @@ function showLicenseScreen(state) {
   // Show the requested state
   const target = document.getElementById(`license-${state}`);
   if (target) target.classList.remove("hidden");
+
+  // Load admin contact number for license screens
+  if (state !== "checking") {
+    loadAdminContact();
+  }
 }
 
 async function requestTrialVersion() {
@@ -1222,6 +1227,7 @@ async function loadProfileInfo() {
   // Fetch and display plan info
   if (number) {
     loadPlanInfo(number);
+    loadAdminContact();
   }
 }
 
@@ -1285,6 +1291,32 @@ async function loadPlanInfo(phoneNumber) {
     }
   } catch (err) {
     console.error("Failed to load plan info:", err);
+  }
+}
+
+// Fetch admin contact number and populate all contact display elements
+async function loadAdminContact() {
+  try {
+    const result = await window.api.getAdminContact();
+    const contactEls = document.querySelectorAll(".admin-contact-number");
+    const containerEls = document.querySelectorAll(".admin-contact-info");
+
+    if (result.number) {
+      contactEls.forEach((el) => (el.textContent = "+" + result.number));
+      containerEls.forEach((el) => el.classList.remove("hidden"));
+
+      // Also update the profile dropdown contact
+      const profileEl = document.getElementById("profile-admin-number");
+      const profileRow = document.getElementById("profile-admin-contact");
+      if (profileEl) profileEl.textContent = "+" + result.number;
+      if (profileRow) profileRow.classList.remove("hidden");
+    } else {
+      containerEls.forEach((el) => el.classList.add("hidden"));
+      const profileRow = document.getElementById("profile-admin-contact");
+      if (profileRow) profileRow.classList.add("hidden");
+    }
+  } catch (err) {
+    console.error("Failed to load admin contact:", err);
   }
 }
 

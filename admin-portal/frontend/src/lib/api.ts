@@ -54,3 +54,8 @@ export const rejectUserApi = (id: number) =>
   api.patch(`/users/${id}/reject`);
 export const deleteUserApi = (id: number) =>
   api.delete(`/users/${id}`);
+
+// ── Settings ──
+export const getSettingsApi = () => api.get('/settings');
+export const updateSettingApi = (key: string, value: string) =>
+  api.put('/settings', { key, value });

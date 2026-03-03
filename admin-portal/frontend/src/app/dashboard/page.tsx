@@ -35,6 +35,7 @@ import {
   SearchOutlined,
   PlusOutlined,
   SwapOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import {
   getUsersApi,
@@ -46,6 +47,8 @@ import {
   deleteUserApi,
   createUserApi,
   changePlanApi,
+  getSettingsApi,
+  updateSettingApi,
 } from '@/lib/api';
 import { useRouter } from 'next/navigation';
 import dayjs from 'dayjs';
@@ -79,8 +82,12 @@ export default function DashboardPage() {
   const [changePlanOpen, setChangePlanOpen] = useState(false);
   const [changePlanUser, setChangePlanUser] = useState<User | null>(null);
   const [changePlanLoading, setChangePlanLoading] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [adminContact, setAdminContact] = useState('');
   const [addUserForm] = Form.useForm();
   const [changePlanForm] = Form.useForm();
+  const [settingsForm] = Form.useForm();
   const router = useRouter();
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -111,6 +118,9 @@ export default function DashboardPage() {
     }
     fetchData();
 
+    // Load settings
+    loadSettings();
+
     // Start auto-polling
     pollingRef.current = setInterval(() => {
       fetchData(true); // silent refresh — no loading spinner
@@ -120,6 +130,38 @@ export default function DashboardPage() {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
   }, [fetchData, router]);
+
+  const loadSettings = async () => {
+    try {
+      const res = await getSettingsApi();
+      const data = res.data;
+      if (data.admin_contact_number) {
+        setAdminContact(data.admin_contact_number);
+      }
+    } catch (err) {
+      // ignore
+    }
+  };
+
+  const openSettings = () => {
+    settingsForm.setFieldsValue({ adminContactNumber: adminContact });
+    setSettingsOpen(true);
+  };
+
+  const handleSaveSettings = async () => {
+    try {
+      const values = await settingsForm.validateFields();
+      setSettingsLoading(true);
+      await updateSettingApi('admin_contact_number', values.adminContactNumber || '');
+      setAdminContact(values.adminContactNumber || '');
+      message.success('Settings saved');
+      setSettingsOpen(false);
+    } catch (err: any) {
+      if (!err?.errorFields) message.error('Failed to save settings');
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
 
   // ── Filter helper ──
   const filterUsers = useCallback(
@@ -511,6 +553,10 @@ export default function DashboardPage() {
           </Title>
         </Space>
         <Space>
+          <Button
+            icon={<SettingOutlined />}
+            onClick={openSettings}
+          />
           <Button icon={<LogoutOutlined />} onClick={handleLogout}>
             Logout
           </Button>
@@ -705,6 +751,31 @@ export default function DashboardPage() {
               <Select.Option value="TRIAL">Trial (7 days)</Select.Option>
               <Select.Option value="ANNUAL">Annual (1 year)</Select.Option>
             </Select>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ── Settings Modal ── */}
+      <Modal
+        title={
+          <Space>
+            <SettingOutlined />
+            <span>Settings</span>
+          </Space>
+        }
+        open={settingsOpen}
+        onOk={handleSaveSettings}
+        onCancel={() => setSettingsOpen(false)}
+        confirmLoading={settingsLoading}
+        okText="Save"
+      >
+        <Form form={settingsForm} layout="vertical">
+          <Form.Item
+            name="adminContactNumber"
+            label="Admin Contact Number"
+            extra="This number will be shown in the Electron app as 'Contact Administration'. Enter without the + prefix (e.g. 94771234567)."
+          >
+            <Input placeholder="e.g. 94771234567" />
           </Form.Item>
         </Form>
       </Modal>
