@@ -13,7 +13,7 @@ let isClientReady = false;
 let DOWNLOADS_DIR;
 
 // License server URL (change this to your production backend URL)
-const LICENSE_API_URL = "http://localhost:3001/api";
+const LICENSE_API_URL = "https://whatsapp-print-admin.vercel.app/api";
 
 function getUserDataPath(...segments) {
   return path.join(app.getPath("userData"), ...segments);
