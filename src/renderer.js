@@ -45,7 +45,8 @@ function setupButtonListeners() {
 
   // Check for Updates button
   const btnCheckUpdates = document.getElementById("btn-check-updates");
-  if (btnCheckUpdates) btnCheckUpdates.addEventListener("click", () => checkForUpdates());
+  if (btnCheckUpdates)
+    btnCheckUpdates.addEventListener("click", () => checkForUpdates());
 
   // Display current version
   (async () => {
@@ -1260,7 +1261,9 @@ async function loadPlanInfo(phoneNumber) {
           license.planType === "TRIAL" ? "Trial" : "Annual";
         planTypeEl.className =
           "plan-info-value plan-badge " +
-          (license.planType === "TRIAL" ? "plan-badge-trial" : "plan-badge-annual");
+          (license.planType === "TRIAL"
+            ? "plan-badge-trial"
+            : "plan-badge-annual");
       }
 
       // Start date

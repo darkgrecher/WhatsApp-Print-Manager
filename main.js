@@ -1252,7 +1252,9 @@ function createUpdateWindow() {
     },
   });
   updateWindow.loadFile(path.join(__dirname, "src", "update.html"));
-  updateWindow.on("closed", () => { updateWindow = null; });
+  updateWindow.on("closed", () => {
+    updateWindow = null;
+  });
 }
 
 autoUpdater.on("download-progress", (progress) => {
@@ -1273,7 +1275,10 @@ autoUpdater.on("update-downloaded", () => {
 
 autoUpdater.on("error", (err) => {
   if (updateWindow && !updateWindow.isDestroyed()) {
-    updateWindow.webContents.send("update:error", err?.message || "Unknown error");
+    updateWindow.webContents.send(
+      "update:error",
+      err?.message || "Unknown error",
+    );
   }
 });
 
