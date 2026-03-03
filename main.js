@@ -5,9 +5,11 @@ const crypto = require("crypto");
 const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 const QRCode = require("qrcode");
 const mime = require("mime-types");
+const { autoUpdater } = require("electron-updater");
 
 // ── Globals ──────────────────────────────────────────────────────────────────
 let mainWindow;
+let updateWindow;
 let whatsappClient;
 let isClientReady = false;
 let DOWNLOADS_DIR;
@@ -322,6 +324,24 @@ function initWhatsApp(retryAttempt = 1) {
 // ── IPC Handlers ─────────────────────────────────────────────────────────────
 
 /**
+ * Fetches a profile picture URL and returns it as a base64 data URI.
+ * WhatsApp CDN URLs require session cookies, so we download in the main
+ * process and pass the data URI to the renderer.
+ */
+async function fetchProfilePicAsDataUri(url) {
+  if (!url) return null;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const contentType = response.headers.get("content-type") || "image/jpeg";
+    return `data:${contentType};base64,${buffer.toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Utility: run a promise with a timeout. Resolves to fallback on timeout.
  * Attaches a no-op catch to the original promise so that if the timeout wins
  * and the promise later rejects (e.g. "detached Frame"), the rejection is
@@ -420,9 +440,14 @@ ipcMain.handle("get-unread-chats", async () => {
             if (!savedName || savedName === contactNumber) {
               savedName = contact.name || "";
             }
-            profilePicUrl = await withTimeout(
+            const rawUrl = await withTimeout(
               contact.getProfilePicUrl(),
               3000,
+              null,
+            );
+            profilePicUrl = await withTimeout(
+              fetchProfilePicAsDataUri(rawUrl),
+              5000,
               null,
             );
           }
@@ -1047,9 +1072,10 @@ ipcMain.handle("get-profile-info", async () => {
 
     let profilePicUrl = null;
     try {
-      profilePicUrl = await whatsappClient.getProfilePicUrl(
+      const rawUrl = await whatsappClient.getProfilePicUrl(
         info.wid._serialized,
       );
+      profilePicUrl = await fetchProfilePicAsDataUri(rawUrl);
     } catch (e) {
       // Profile pic may not be available
     }
@@ -1201,6 +1227,81 @@ process.on("uncaughtException", (err) => {
   throw err;
 });
 
+// ── Auto-Updater ─────────────────────────────────────────────────────────────
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = true;
+
+function createUpdateWindow() {
+  if (updateWindow && !updateWindow.isDestroyed()) {
+    updateWindow.focus();
+    return;
+  }
+  updateWindow = new BrowserWindow({
+    width: 400,
+    height: 220,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    frame: false,
+    alwaysOnTop: true,
+    center: true,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+  });
+  updateWindow.loadFile(path.join(__dirname, "src", "update.html"));
+  updateWindow.on("closed", () => { updateWindow = null; });
+}
+
+autoUpdater.on("download-progress", (progress) => {
+  if (updateWindow && !updateWindow.isDestroyed()) {
+    updateWindow.webContents.send("update:download-progress", progress);
+  }
+});
+
+autoUpdater.on("update-downloaded", () => {
+  if (updateWindow && !updateWindow.isDestroyed()) {
+    updateWindow.webContents.send("update:downloaded");
+  }
+  // Wait a moment so user sees "Installing..." then quit-and-install
+  setTimeout(() => {
+    autoUpdater.quitAndInstall(false, true);
+  }, 2000);
+});
+
+autoUpdater.on("error", (err) => {
+  if (updateWindow && !updateWindow.isDestroyed()) {
+    updateWindow.webContents.send("update:error", err?.message || "Unknown error");
+  }
+});
+
+ipcMain.handle("check-for-updates", async () => {
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    if (!result || !result.updateInfo) {
+      return { available: false };
+    }
+    const latest = result.updateInfo.version;
+    const current = app.getVersion();
+    if (latest === current) {
+      return { available: false, current };
+    }
+    // Update is available — open progress window and start download
+    createUpdateWindow();
+    autoUpdater.downloadUpdate();
+    return { available: true, current, latest };
+  } catch (err) {
+    console.error("[Updater] Check failed:", err.message);
+    return { available: false, error: err.message };
+  }
+});
+
+ipcMain.handle("get-app-version", () => {
+  return app.getVersion();
+});
+
 // ── App Lifecycle ────────────────────────────────────────────────────────────
 
 // Prevent multiple instances of the app
@@ -1244,6 +1345,13 @@ if (!gotSingleLock) {
         thumbWindow.close();
       } catch (_) {}
       thumbWindow = null;
+    }
+    // Close update window if open
+    if (updateWindow && !updateWindow.isDestroyed()) {
+      try {
+        updateWindow.close();
+      } catch (_) {}
+      updateWindow = null;
     }
     if (whatsappClient) {
       try {

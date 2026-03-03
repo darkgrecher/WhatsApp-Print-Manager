@@ -43,6 +43,19 @@ function setupButtonListeners() {
   const btnLogout = document.getElementById("btn-logout");
   if (btnLogout) btnLogout.addEventListener("click", () => logoutWhatsApp());
 
+  // Check for Updates button
+  const btnCheckUpdates = document.getElementById("btn-check-updates");
+  if (btnCheckUpdates) btnCheckUpdates.addEventListener("click", () => checkForUpdates());
+
+  // Display current version
+  (async () => {
+    try {
+      const version = await window.api.getAppVersion();
+      const badge = document.getElementById("current-version");
+      if (badge) badge.textContent = "v" + version;
+    } catch (_) {}
+  })();
+
   // Close dropdown when clicking outside
   document.addEventListener("click", (e) => {
     const dropdown = document.getElementById("profile-dropdown");
@@ -1333,6 +1346,24 @@ async function logoutWhatsApp() {
   stopAutoRefresh();
 
   await window.api.logoutWhatsApp();
+}
+
+async function checkForUpdates() {
+  const dropdown = document.getElementById("profile-dropdown");
+  dropdown.classList.add("hidden");
+
+  showToast("Checking for updates...", "info");
+  try {
+    const result = await window.api.checkForUpdates();
+    if (result.error) {
+      showToast("Update check failed: " + result.error, "error");
+    } else if (!result.available) {
+      showToast("You're on the latest version!", "success");
+    }
+    // If available, the main process opens the update progress window
+  } catch (err) {
+    showToast("Could not check for updates", "error");
+  }
 }
 
 function switchToLoginScreen() {

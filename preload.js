@@ -48,4 +48,8 @@ contextBridge.exposeInMainWorld("api", {
 
   // ── Settings ──
   getAdminContact: () => ipcRenderer.invoke("get-admin-contact"),
+
+  // ── Updates ──
+  checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
+  getAppVersion: () => ipcRenderer.invoke("get-app-version"),
 });
