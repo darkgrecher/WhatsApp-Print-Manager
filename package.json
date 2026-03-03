@@ -8,8 +8,7 @@
     "dev": "electron . --dev",
     "generate-icons": "electron-icon-builder --input=src/icon.png --output=build --flatten",
     "build:win": "electron-builder --win --publish never",
-    "build:mac": "electron-builder --mac --publish never",
-    "build": "electron-builder --win --mac --publish never"
+    "build": "electron-builder --win --publish never"
   },
   "build": {
     "appId": "com.bookshop.whatsapp-print-manager",
@@ -58,24 +57,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "WhatsApp Print Manager"
-    },
-    "mac": {
-      "target": [
-        {
-          "target": "dmg",
-          "arch": ["x64", "arm64"]
-        }
-      ],
-      "icon": "build/icons/icon.icns",
-      "category": "public.app-category.utilities"
-    },
-    "dmg": {
-      "title": "WhatsApp Print Manager ${version}",
-      "window": {
-        "width": 540,
-        "height": 380
-      }
     }
+
   },
   "keywords": [
     "whatsapp",
