@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-print-app",
-  "version": "1.0.0",
+  "version": "2.1.0",
   "description": "WhatsApp Print Manager - Download and print files from WhatsApp messages",
   "main": "main.js",
   "scripts": {
@@ -8,8 +8,8 @@
     "dev": "electron . --dev",
     "generate-icons": "electron-icon-builder --input=src/icon.png --output=build --flatten",
     "build:win": "electron-builder --win --publish never",
-    "build:mac": "electron-builder --mac --publish never",
-    "build": "electron-builder --win --mac --publish never"
+    "build": "electron-builder --win --publish never",
+    "release": "electron-builder --win --publish always"
   },
   "build": {
     "appId": "com.bookshop.whatsapp-print-manager",
@@ -43,10 +43,17 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "build/icons/icon.ico"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "darkgrecher",
+      "repo": "WhatsApp-Print-Manager"
     },
     "nsis": {
       "oneClick": false,
@@ -58,23 +65,6 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "WhatsApp Print Manager"
-    },
-    "mac": {
-      "target": [
-        {
-          "target": "dmg",
-          "arch": ["x64", "arm64"]
-        }
-      ],
-      "icon": "build/icons/icon.icns",
-      "category": "public.app-category.utilities"
-    },
-    "dmg": {
-      "title": "WhatsApp Print Manager ${version}",
-      "window": {
-        "width": 540,
-        "height": 380
-      }
     }
   },
   "keywords": [
@@ -85,6 +75,9 @@
   "author": "Bookshop",
   "license": "MIT",
   "dependencies": {
+    "dotenv": "^17.3.1",
+    "electron-updater": "^6.3.0",
+    "electron-updater": "^6.8.3",
     "mime-types": "^2.1.35",
     "pdf-to-printer": "^5.6.0",
     "qrcode": "^1.5.3",

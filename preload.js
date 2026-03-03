@@ -40,4 +40,16 @@ contextBridge.exposeInMainWorld("api", {
   deleteFiles: (data) => ipcRenderer.invoke("delete-files", data),
   generateThumbnail: (filePath) =>
     ipcRenderer.invoke("generate-thumbnail", filePath),
+
+  // ── License Validation ──
+  checkLicense: (phoneNumber) =>
+    ipcRenderer.invoke("check-license", phoneNumber),
+  requestTrial: (data) => ipcRenderer.invoke("request-trial", data),
+
+  // ── Settings ──
+  getAdminContact: () => ipcRenderer.invoke("get-admin-contact"),
+
+  // ── Updates ──
+  checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
+  getAppVersion: () => ipcRenderer.invoke("get-app-version"),
 });

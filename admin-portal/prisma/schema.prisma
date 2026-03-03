@@ -1,0 +1,42 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id            Int        @id @default(autoincrement())
+  phoneNumber   String     @unique @map("phone_number")
+  displayName   String?    @map("display_name")
+  status        UserStatus @default(PENDING)
+  planType      PlanType?  @map("plan_type")
+  planStartDate DateTime?  @map("plan_start_date")
+  planEndDate   DateTime?  @map("plan_end_date")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  REJECTED
+}
+
+enum PlanType {
+  TRIAL
+  ANNUAL
+}
+
+model Setting {
+  key   String @id
+  value String
+
+  @@map("settings")
+}

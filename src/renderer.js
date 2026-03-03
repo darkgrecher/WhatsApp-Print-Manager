@@ -43,6 +43,20 @@ function setupButtonListeners() {
   const btnLogout = document.getElementById("btn-logout");
   if (btnLogout) btnLogout.addEventListener("click", () => logoutWhatsApp());
 
+  // Check for Updates button
+  const btnCheckUpdates = document.getElementById("btn-check-updates");
+  if (btnCheckUpdates)
+    btnCheckUpdates.addEventListener("click", () => checkForUpdates());
+
+  // Display current version
+  (async () => {
+    try {
+      const version = await window.api.getAppVersion();
+      const badge = document.getElementById("current-version");
+      if (badge) badge.textContent = "v" + version;
+    } catch (_) {}
+  })();
+
   // Close dropdown when clicking outside
   document.addEventListener("click", (e) => {
     const dropdown = document.getElementById("profile-dropdown");
@@ -101,6 +115,35 @@ function setupButtonListeners() {
       filterFiles("");
     });
   }
+
+  // ── License screen buttons ──
+  const btnRequestTrial = document.getElementById("btn-request-trial");
+  if (btnRequestTrial)
+    btnRequestTrial.addEventListener("click", () => requestTrialVersion());
+
+  const btnCheckAgain = document.getElementById("btn-check-again");
+  if (btnCheckAgain)
+    btnCheckAgain.addEventListener("click", () => recheckLicense());
+
+  const btnCheckAgainExpired = document.getElementById(
+    "btn-check-again-expired",
+  );
+  if (btnCheckAgainExpired)
+    btnCheckAgainExpired.addEventListener("click", () => recheckLicense());
+
+  const btnCheckAgainRejected = document.getElementById(
+    "btn-check-again-rejected",
+  );
+  if (btnCheckAgainRejected)
+    btnCheckAgainRejected.addEventListener("click", () => recheckLicense());
+
+  const btnCheckAgainError = document.getElementById("btn-check-again-error");
+  if (btnCheckAgainError)
+    btnCheckAgainError.addEventListener("click", () => recheckLicense());
+
+  const btnLicenseLogout = document.getElementById("btn-license-logout");
+  if (btnLicenseLogout)
+    btnLicenseLogout.addEventListener("click", () => licenseLogout());
 }
 
 function setupEventListeners() {
@@ -133,8 +176,7 @@ function setupEventListeners() {
         showLoginLoading();
         break;
       case "ready":
-        switchToMainScreen();
-        refreshChats();
+        validateLicense();
         break;
       case "disconnected":
         if (badge) {
@@ -233,8 +275,161 @@ function showLoginLoading() {
   if (loadingContainer) loadingContainer.classList.remove("hidden");
 }
 
+// ── License Validation ───────────────────────────────────────────────────
+let licensePhoneNumber = null;
+let licenseUserName = null;
+
+async function validateLicense() {
+  // Show license checking screen
+  showLicenseScreen("checking");
+
+  try {
+    // Get profile info to determine the phone number
+    const profile = await window.api.getProfileInfo();
+    if (profile.error) {
+      console.error("Could not get profile info:", profile.error);
+      // If we can't get the number, let them through (graceful degradation)
+      switchToMainScreen();
+      refreshChats();
+      return;
+    }
+
+    licensePhoneNumber = profile.number;
+    licenseUserName = profile.name;
+
+    // Display the phone number on the license screen
+    const phoneDisplay = document.getElementById("license-phone-display");
+    if (phoneDisplay) {
+      phoneDisplay.textContent = "+" + licensePhoneNumber;
+    }
+    const nameDisplay = document.getElementById("license-name-display");
+    if (nameDisplay) {
+      nameDisplay.textContent = licenseUserName || "";
+    }
+
+    // Check license with backend
+    const result = await window.api.checkLicense(licensePhoneNumber);
+
+    switch (result.status) {
+      case "active":
+        // User has an active plan — proceed to main app
+        switchToMainScreen();
+        refreshChats();
+        break;
+
+      case "pending":
+        // Trial request submitted but not yet approved
+        showLicenseScreen("pending");
+        break;
+
+      case "expired":
+        // Plan has expired
+        showLicenseScreen("expired");
+        break;
+
+      case "rejected":
+        // Request was rejected
+        showLicenseScreen("rejected");
+        break;
+
+      case "not_found":
+        // New user — show request trial button
+        showLicenseScreen("no-plan");
+        break;
+
+      case "error":
+        // Could not connect to license server — allow graceful degradation
+        console.warn("License server unavailable:", result.message);
+        showLicenseScreen("error");
+        break;
+
+      default:
+        showLicenseScreen("no-plan");
+        break;
+    }
+  } catch (err) {
+    console.error("License validation error:", err);
+    showLicenseScreen("error");
+  }
+}
+
+function showLicenseScreen(state) {
+  // Hide login and main screens, show license screen
+  document.getElementById("login-screen").classList.remove("active");
+  document.getElementById("main-screen").classList.remove("active");
+  document.getElementById("license-screen").classList.add("active");
+
+  // Hide all license states
+  const states = [
+    "license-checking",
+    "license-no-plan",
+    "license-pending",
+    "license-expired",
+    "license-rejected",
+    "license-error",
+  ];
+  states.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add("hidden");
+  });
+
+  // Show the requested state
+  const target = document.getElementById(`license-${state}`);
+  if (target) target.classList.remove("hidden");
+
+  // Load admin contact number for license screens
+  if (state !== "checking") {
+    loadAdminContact();
+  }
+}
+
+async function requestTrialVersion() {
+  const btn = document.getElementById("btn-request-trial");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Submitting request...";
+  }
+
+  try {
+    const result = await window.api.requestTrial({
+      phoneNumber: licensePhoneNumber,
+      name: licenseUserName,
+    });
+
+    if (result.success) {
+      showToast(result.message || "Trial request submitted!", "info");
+      showLicenseScreen("pending");
+    } else {
+      showToast(result.message || "Failed to submit request", "error");
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Request Trial Version";
+      }
+    }
+  } catch (err) {
+    showToast("Failed to connect to license server", "error");
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Request Trial Version";
+    }
+  }
+}
+
+async function recheckLicense() {
+  showLicenseScreen("checking");
+  // Small delay to show checking state
+  await new Promise((r) => setTimeout(r, 500));
+  await validateLicense();
+}
+
+async function licenseLogout() {
+  showToast("Logging out...", "info");
+  await window.api.logoutWhatsApp();
+}
+
 function switchToMainScreen() {
   document.getElementById("login-screen").classList.remove("active");
+  document.getElementById("license-screen").classList.remove("active");
   document.getElementById("main-screen").classList.add("active");
 
   const badge = document.getElementById("connection-badge");
@@ -1042,6 +1237,103 @@ async function loadProfileInfo() {
   document.getElementById("profile-number").textContent = number
     ? `+${number}`
     : "";
+
+  // Fetch and display plan info
+  if (number) {
+    loadPlanInfo(number);
+    loadAdminContact();
+  }
+}
+
+async function loadPlanInfo(phoneNumber) {
+  try {
+    const license = await window.api.checkLicense(phoneNumber);
+    const section = document.getElementById("plan-info-section");
+    if (!section) return;
+
+    if (license.status === "active" && license.planType) {
+      section.classList.remove("hidden");
+
+      // Plan type
+      const planTypeEl = document.getElementById("plan-type-display");
+      if (planTypeEl) {
+        planTypeEl.textContent =
+          license.planType === "TRIAL" ? "Trial" : "Annual";
+        planTypeEl.className =
+          "plan-info-value plan-badge " +
+          (license.planType === "TRIAL"
+            ? "plan-badge-trial"
+            : "plan-badge-annual");
+      }
+
+      // Start date
+      const startEl = document.getElementById("plan-start-display");
+      if (startEl && license.planStartDate) {
+        const d = new Date(license.planStartDate);
+        startEl.textContent = d.toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        });
+      }
+
+      // End date
+      const endEl = document.getElementById("plan-end-display");
+      if (endEl && license.expiresAt) {
+        const d = new Date(license.expiresAt);
+        endEl.textContent = d.toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        });
+      }
+
+      // Days left
+      const daysEl = document.getElementById("plan-days-left");
+      if (daysEl && license.expiresAt) {
+        const now = new Date();
+        const end = new Date(license.expiresAt);
+        const diffMs = end - now;
+        const daysLeft = Math.max(0, Math.ceil(diffMs / 86400000));
+        daysEl.textContent = daysLeft + (daysLeft === 1 ? " day" : " days");
+        if (daysLeft <= 3) {
+          daysEl.classList.add("plan-days-critical");
+        } else if (daysLeft <= 7) {
+          daysEl.classList.add("plan-days-warning");
+        }
+      }
+    } else {
+      section.classList.add("hidden");
+    }
+  } catch (err) {
+    console.error("Failed to load plan info:", err);
+  }
+}
+
+// Fetch admin contact number and populate all contact display elements
+async function loadAdminContact() {
+  try {
+    const result = await window.api.getAdminContact();
+    const contactEls = document.querySelectorAll(".admin-contact-number");
+    const containerEls = document.querySelectorAll(".admin-contact-info");
+
+    if (result.number) {
+      contactEls.forEach((el) => (el.textContent = "+" + result.number));
+      containerEls.forEach((el) => el.classList.remove("hidden"));
+
+      // Also update the profile dropdown contact
+      const profileEl = document.getElementById("profile-admin-number");
+      const profileRow = document.getElementById("profile-admin-contact");
+      if (profileEl) profileEl.textContent = "+" + result.number;
+      if (profileRow) profileRow.classList.remove("hidden");
+    } else {
+      containerEls.forEach((el) => el.classList.add("hidden"));
+      const profileRow = document.getElementById("profile-admin-contact");
+      if (profileRow) profileRow.classList.add("hidden");
+    }
+  } catch (err) {
+    console.error("Failed to load admin contact:", err);
+  }
 }
 
 function toggleProfileDropdown() {
@@ -1059,6 +1351,24 @@ async function logoutWhatsApp() {
   await window.api.logoutWhatsApp();
 }
 
+async function checkForUpdates() {
+  const dropdown = document.getElementById("profile-dropdown");
+  dropdown.classList.add("hidden");
+
+  showToast("Checking for updates...", "info");
+  try {
+    const result = await window.api.checkForUpdates();
+    if (result.error) {
+      showToast("Update check failed: " + result.error, "error");
+    } else if (!result.available) {
+      showToast("You're on the latest version!", "success");
+    }
+    // If available, the main process opens the update progress window
+  } catch (err) {
+    showToast("Could not check for updates", "error");
+  }
+}
+
 function switchToLoginScreen() {
   // Reset state
   currentChatId = null;
@@ -1069,6 +1379,7 @@ function switchToLoginScreen() {
 
   // Switch screens
   document.getElementById("main-screen").classList.remove("active");
+  document.getElementById("license-screen").classList.remove("active");
   const loginScreen = document.getElementById("login-screen");
   loginScreen.classList.add("active");
 
