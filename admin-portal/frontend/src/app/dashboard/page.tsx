@@ -773,7 +773,7 @@ export default function DashboardPage() {
           <Form.Item
             name="adminContactNumber"
             label="Admin Contact Number"
-            extra="This number will be shown in the Electron app as 'Contact Administration'. Enter without the + prefix (e.g. 94771234567)."
+            extra="This number will be shown in the Whatsapp-print-manager application as 'Contact Administration'. Enter without the + prefix (e.g. 94771234567)."
           >
             <Input placeholder="e.g. 94771234567" />
           </Form.Item>
