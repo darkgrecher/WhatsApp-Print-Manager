@@ -989,7 +989,9 @@ ipcMain.handle("get-whatsapp-status", async () => {
 // ── Admin Contact ────────────────────────────────────────────────────────────
 ipcMain.handle("get-admin-contact", async () => {
   try {
-    const response = await fetch(`${LICENSE_API_URL}/settings/admin_contact_number`);
+    const response = await fetch(
+      `${LICENSE_API_URL}/settings/admin_contact_number`,
+    );
     if (!response.ok) return { number: null };
     const data = await response.json();
     return { number: data.value || null };
