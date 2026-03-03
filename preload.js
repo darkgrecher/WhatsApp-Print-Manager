@@ -40,4 +40,9 @@ contextBridge.exposeInMainWorld("api", {
   deleteFiles: (data) => ipcRenderer.invoke("delete-files", data),
   generateThumbnail: (filePath) =>
     ipcRenderer.invoke("generate-thumbnail", filePath),
+
+  // ── License Validation ──
+  checkLicense: (phoneNumber) =>
+    ipcRenderer.invoke("check-license", phoneNumber),
+  requestTrial: (data) => ipcRenderer.invoke("request-trial", data),
 });

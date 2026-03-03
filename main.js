@@ -12,6 +12,9 @@ let whatsappClient;
 let isClientReady = false;
 let DOWNLOADS_DIR;
 
+// License server URL (change this to your production backend URL)
+const LICENSE_API_URL = "http://localhost:3001/api";
+
 function getUserDataPath(...segments) {
   return path.join(app.getPath("userData"), ...segments);
 }
@@ -981,6 +984,41 @@ ipcMain.handle("reconnect-whatsapp", async () => {
 // Get WhatsApp status
 ipcMain.handle("get-whatsapp-status", async () => {
   return { ready: isClientReady };
+});
+
+// ── License Validation ───────────────────────────────────────────────────────
+ipcMain.handle("check-license", async (_, phoneNumber) => {
+  try {
+    const response = await fetch(`${LICENSE_API_URL}/license/check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phoneNumber }),
+    });
+    if (!response.ok) {
+      return { status: "error", message: "License server returned an error" };
+    }
+    return await response.json();
+  } catch (err) {
+    console.error("[License] Check failed:", err.message);
+    return { status: "error", message: "Could not connect to license server" };
+  }
+});
+
+ipcMain.handle("request-trial", async (_, { phoneNumber, name }) => {
+  try {
+    const response = await fetch(`${LICENSE_API_URL}/license/request-trial`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phoneNumber, name }),
+    });
+    if (!response.ok) {
+      return { success: false, message: "License server returned an error" };
+    }
+    return await response.json();
+  } catch (err) {
+    console.error("[License] Trial request failed:", err.message);
+    return { success: false, message: "Could not connect to license server" };
+  }
 });
 
 // Get the logged-in user's profile info

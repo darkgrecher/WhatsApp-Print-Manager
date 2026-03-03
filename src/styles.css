@@ -146,6 +146,92 @@ body {
   margin-top: 8px;
 }
 
+/* ── License Validation Screen ───────────────────────────────────────────── */
+#license-screen {
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #075e54 0%, #128c7e 50%, #25d366 100%);
+}
+
+.license-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 0;
+}
+
+.license-state.hidden {
+  display: none;
+}
+
+.license-icon {
+  margin-bottom: 16px;
+}
+
+.license-user-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.license-phone {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--wa-green);
+  margin-bottom: 16px;
+  font-family: 'Courier New', monospace;
+  background: #f0faf0;
+  padding: 6px 16px;
+  border-radius: 20px;
+}
+
+.license-message {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.license-sub-message {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 24px;
+  text-align: center;
+  max-width: 340px;
+  line-height: 1.5;
+}
+
+.btn-large {
+  padding: 12px 32px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.btn-text {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 12px;
+  margin-top: 16px;
+  transition: color 0.2s;
+}
+
+.btn-text:hover {
+  color: var(--text-primary);
+}
+
+.license-logout-btn {
+  opacity: 0.7;
+}
+
+.license-logout-btn:hover {
+  opacity: 1;
+}
+
 /* ── Top Bar ─────────────────────────────────────────────────────────────── */
 .topbar {
   display: flex;
@@ -1081,6 +1167,53 @@ body {
 .profile-dropdown-divider {
   height: 1px;
   background: var(--border-color);
+}
+
+/* Plan info in profile dropdown */
+.plan-info-section {
+  padding: 12px 20px;
+}
+.plan-info-section.hidden {
+  display: none;
+}
+.plan-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+.plan-info-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.plan-info-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.plan-badge {
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+.plan-badge-trial {
+  background: #e6f4ff;
+  color: #1677ff;
+}
+.plan-badge-annual {
+  background: #f3e8ff;
+  color: #7c3aed;
+}
+.plan-days-left {
+  color: var(--wa-green);
+}
+.plan-days-warning {
+  color: #fa8c16;
+}
+.plan-days-critical {
+  color: #dc2626;
+  font-weight: 700;
 }
 
 .profile-dropdown-item {

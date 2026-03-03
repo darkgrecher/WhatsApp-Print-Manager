@@ -44,6 +44,103 @@
         </div>
     </div>
 
+    <!-- ════════════════ LICENSE VALIDATION SCREEN ════════════════ -->
+    <div id="license-screen" class="screen">
+        <div class="login-container">
+            <div class="logo">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#25D366" stroke-width="1.5"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path
+                        d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                </svg>
+                <h1>WhatsApp Print Manager</h1>
+            </div>
+
+            <!-- Checking license -->
+            <div id="license-checking" class="license-state">
+                <div class="spinner"></div>
+                <p class="license-message">Validating your license...</p>
+            </div>
+
+            <!-- No plan — new user -->
+            <div id="license-no-plan" class="license-state hidden">
+                <div class="license-icon license-icon-info">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#fa8c16" stroke-width="1.5">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="16" x2="12" y2="12" />
+                        <line x1="12" y1="8" x2="12.01" y2="8" />
+                    </svg>
+                </div>
+                <p id="license-name-display" class="license-user-name"></p>
+                <p id="license-phone-display" class="license-phone"></p>
+                <p class="license-message">Your WhatsApp number is not registered in our system.</p>
+                <p class="license-sub-message">Request a free 7-day trial to get started.</p>
+                <button id="btn-request-trial" class="btn btn-primary btn-large">
+                    🚀 Request Trial Version
+                </button>
+            </div>
+
+            <!-- Pending approval -->
+            <div id="license-pending" class="license-state hidden">
+                <div class="license-icon license-icon-pending">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#fa8c16" stroke-width="1.5">
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                </div>
+                <p class="license-message">Your trial request has been submitted!</p>
+                <p class="license-sub-message">Please wait for an administrator to activate your account. This usually takes a few minutes.</p>
+                <button id="btn-check-again" class="btn btn-secondary">🔄 Check Again</button>
+            </div>
+
+            <!-- Expired -->
+            <div id="license-expired" class="license-state hidden">
+                <div class="license-icon license-icon-expired">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="1.5">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="15" y1="9" x2="9" y2="15" />
+                        <line x1="9" y1="9" x2="15" y2="15" />
+                    </svg>
+                </div>
+                <p class="license-message">Your plan has expired.</p>
+                <p class="license-sub-message">Please contact the administrator to renew your subscription.</p>
+                <button id="btn-check-again-expired" class="btn btn-secondary">🔄 Check Again</button>
+            </div>
+
+            <!-- Rejected -->
+            <div id="license-rejected" class="license-state hidden">
+                <div class="license-icon license-icon-expired">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="1.5">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="15" y1="9" x2="9" y2="15" />
+                        <line x1="9" y1="9" x2="15" y2="15" />
+                    </svg>
+                </div>
+                <p class="license-message">Your request has been rejected.</p>
+                <p class="license-sub-message">Please contact the administrator for more information.</p>
+                <button id="btn-check-again-rejected" class="btn btn-secondary">🔄 Check Again</button>
+            </div>
+
+            <!-- Error connecting to license server -->
+            <div id="license-error" class="license-state hidden">
+                <div class="license-icon license-icon-info">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#fa8c16" stroke-width="1.5">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                        <line x1="12" y1="9" x2="12" y2="13" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                </div>
+                <p class="license-message">Could not connect to the license server.</p>
+                <p class="license-sub-message">Please check your internet connection and try again.</p>
+                <button id="btn-check-again-error" class="btn btn-secondary">🔄 Try Again</button>
+            </div>
+
+            <button id="btn-license-logout" class="btn btn-text license-logout-btn">
+                ← Switch WhatsApp Account
+            </button>
+        </div>
+    </div>
+
     <!-- ════════════════ MAIN APP SCREEN ════════════════ -->
     <div id="main-screen" class="screen">
 
@@ -87,6 +184,25 @@
                             <div class="profile-dropdown-info">
                                 <div class="profile-dropdown-name" id="profile-name">Loading...</div>
                                 <div class="profile-dropdown-number" id="profile-number"></div>
+                            </div>
+                        </div>
+                        <div class="profile-dropdown-divider"></div>
+                        <div id="plan-info-section" class="plan-info-section hidden">
+                            <div class="plan-info-row">
+                                <span class="plan-info-label">Plan</span>
+                                <span class="plan-info-value" id="plan-type-display">—</span>
+                            </div>
+                            <div class="plan-info-row">
+                                <span class="plan-info-label">Start Date</span>
+                                <span class="plan-info-value" id="plan-start-display">—</span>
+                            </div>
+                            <div class="plan-info-row">
+                                <span class="plan-info-label">Expires</span>
+                                <span class="plan-info-value" id="plan-end-display">—</span>
+                            </div>
+                            <div class="plan-info-row">
+                                <span class="plan-info-label">Days Left</span>
+                                <span class="plan-info-value plan-days-left" id="plan-days-left">—</span>
                             </div>
                         </div>
                         <div class="profile-dropdown-divider"></div>
