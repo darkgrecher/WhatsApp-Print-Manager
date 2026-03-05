@@ -70,11 +70,15 @@ function isHistorySynced() {
 }
 
 function markHistorySynced() {
-  try { fs.writeFileSync(getSyncMarkerPath(), Date.now().toString()); } catch (_) {}
+  try {
+    fs.writeFileSync(getSyncMarkerPath(), Date.now().toString());
+  } catch (_) {}
 }
 
 function clearSyncMarker() {
-  try { if (fs.existsSync(getSyncMarkerPath())) fs.unlinkSync(getSyncMarkerPath()); } catch (_) {}
+  try {
+    if (fs.existsSync(getSyncMarkerPath())) fs.unlinkSync(getSyncMarkerPath());
+  } catch (_) {}
 }
 
 /**
@@ -85,7 +89,9 @@ function loadStoreFromDisk() {
   try {
     if (fs.existsSync(storePath)) {
       store.readFromFile(storePath);
-      console.log(`[WhatsApp] Store loaded from disk (${getAllStoreChats().length} chats)`);
+      console.log(
+        `[WhatsApp] Store loaded from disk (${getAllStoreChats().length} chats)`,
+      );
     }
   } catch (err) {
     console.error("[WhatsApp] Failed to read store from disk:", err.message);
@@ -302,12 +308,11 @@ function getAllStoreChats() {
       .filter((c) => {
         if (!c.id) return false;
         // Skip system/broadcast JIDs
-        if (c.id === "status@broadcast" || c.id === "0@s.whatsapp.net") return false;
+        if (c.id === "status@broadcast" || c.id === "0@s.whatsapp.net")
+          return false;
         return true;
       })
-      .sort(
-      (a, b) => getChatTimestamp(b) - getChatTimestamp(a),
-    );
+      .sort((a, b) => getChatTimestamp(b) - getChatTimestamp(a));
   } catch (err) {
     console.error("[WhatsApp] getAllStoreChats error:", err.message);
     return [];
@@ -417,7 +422,9 @@ async function initWhatsApp() {
     } catch (_) {}
 
     if (wasAuthenticated && !isHistorySynced()) {
-      console.log("[WhatsApp] Previously authenticated but history never synced — forcing re-auth");
+      console.log(
+        "[WhatsApp] Previously authenticated but history never synced — forcing re-auth",
+      );
       try {
         fs.rmSync(authPath, { recursive: true, force: true });
         fs.mkdirSync(authPath, { recursive: true });
@@ -491,7 +498,9 @@ async function initWhatsApp() {
       const newJid = sock.user?.id;
       if (currentAccountJid && newJid && currentAccountJid !== newJid) {
         // Account switched — wipe the old store data
-        console.log(`[WhatsApp] Account changed (${currentAccountJid} -> ${newJid}), clearing store`);
+        console.log(
+          `[WhatsApp] Account changed (${currentAccountJid} -> ${newJid}), clearing store`,
+        );
         resetStore();
         store.bind(sock.ev);
       }
@@ -502,7 +511,9 @@ async function initWhatsApp() {
       // If we have cached chats from disk, go ready quickly
       const cachedCount = getAllStoreChats().length;
       if (cachedCount > 0) {
-        console.log(`[WhatsApp] ${cachedCount} cached chats available, going ready immediately`);
+        console.log(
+          `[WhatsApp] ${cachedCount} cached chats available, going ready immediately`,
+        );
         mainWindow?.webContents?.send("whatsapp:loading", {
           percent: 100,
           message: `Loaded ${cachedCount} chats`,
@@ -523,7 +534,9 @@ async function initWhatsApp() {
       isClientReady = false;
 
       // Save store to disk before disconnecting
-      try { store.writeToFile(getStorePath()); } catch (_) {}
+      try {
+        store.writeToFile(getStorePath());
+      } catch (_) {}
 
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
@@ -555,17 +568,23 @@ async function initWhatsApp() {
   // ── History sync tracking ──
   sock.ev.on("messaging-history.set", ({ chats: syncedChats, isLatest }) => {
     const totalChats = getAllStoreChats().length;
-    console.log(`[WhatsApp] History sync: +${syncedChats?.length || 0} chats (total: ${totalChats}, isLatest: ${isLatest})`);
+    console.log(
+      `[WhatsApp] History sync: +${syncedChats?.length || 0} chats (total: ${totalChats}, isLatest: ${isLatest})`,
+    );
     mainWindow?.webContents?.send("whatsapp:loading", {
       percent: Math.min(90, 30 + totalChats),
       message: `Syncing chats... (${totalChats} loaded)`,
     });
     // Persist immediately so synced chats survive a crash
-    try { store.writeToFile(getStorePath()); } catch (_) {}
+    try {
+      store.writeToFile(getStorePath());
+    } catch (_) {}
     // Mark sync complete once the final batch arrives
     if (isLatest) {
       markHistorySynced();
-      console.log(`[WhatsApp] History sync complete — ${totalChats} chats cached`);
+      console.log(
+        `[WhatsApp] History sync complete — ${totalChats} chats cached`,
+      );
     }
     // Notify renderer so chat list updates as history batches arrive
     notifyChatsUpdated();
@@ -573,22 +592,30 @@ async function initWhatsApp() {
 
   sock.ev.on("chats.upsert", (newChats) => {
     const total = getAllStoreChats().length;
-    console.log(`[WhatsApp] chats.upsert: +${newChats?.length || 0} (total: ${total})`);
+    console.log(
+      `[WhatsApp] chats.upsert: +${newChats?.length || 0} (total: ${total})`,
+    );
     // Persist new chats promptly
-    try { store.writeToFile(getStorePath()); } catch (_) {}
+    try {
+      store.writeToFile(getStorePath());
+    } catch (_) {}
     // Notify renderer that the chat list changed
     notifyChatsUpdated();
   });
 
   // ── Chat metadata updates (unread count, timestamp, name changes) ──
   sock.ev.on("chats.update", (updates) => {
-    console.log(`[WhatsApp] chats.update: ${updates?.length || 0} chats updated`);
+    console.log(
+      `[WhatsApp] chats.update: ${updates?.length || 0} chats updated`,
+    );
     // The in-memory store already applies the updates; notify renderer
     notifyChatsUpdated();
   });
 
   sock.ev.on("chats.delete", (deletions) => {
-    console.log(`[WhatsApp] chats.delete: ${deletions?.length || 0} chats removed`);
+    console.log(
+      `[WhatsApp] chats.delete: ${deletions?.length || 0} chats removed`,
+    );
     notifyChatsUpdated();
   });
 
@@ -621,7 +648,11 @@ async function initWhatsApp() {
       const contactNumber = extractPhoneNumber(jid);
       const contact = getContact(jid);
       const senderName =
-        msg.pushName || contact?.notify || contact?.name || contactNumber || jid.split("@")[0];
+        msg.pushName ||
+        contact?.notify ||
+        contact?.name ||
+        contactNumber ||
+        jid.split("@")[0];
 
       const chatName = resolveChatName(jid);
 
@@ -662,10 +693,15 @@ async function initWhatsApp() {
         }
 
         try {
-          const buffer = await downloadMediaMessage(msg, "buffer", {}, {
-            logger: baileysLogger,
-            reuploadRequest: sock?.updateMediaMessage,
-          });
+          const buffer = await downloadMediaMessage(
+            msg,
+            "buffer",
+            {},
+            {
+              logger: baileysLogger,
+              reuploadRequest: sock?.updateMediaMessage,
+            },
+          );
           if (buffer) {
             const safeMsgId = messageData.messageId.replace(
               /[^a-zA-Z0-9]/g,
@@ -737,7 +773,9 @@ function waitForChatsAndReady() {
     const elapsed = Date.now() - startTime;
     const chatCount = getAllStoreChats().length;
 
-    console.log(`[WhatsApp] Sync poll: ${chatCount} chats after ${Math.round(elapsed / 1000)}s`);
+    console.log(
+      `[WhatsApp] Sync poll: ${chatCount} chats after ${Math.round(elapsed / 1000)}s`,
+    );
 
     if (chatCount > 0 || elapsed >= MAX_WAIT_MS) {
       // Chats arrived or timeout reached — declare ready
@@ -747,7 +785,9 @@ function waitForChatsAndReady() {
       });
       isClientReady = true;
       mainWindow?.webContents?.send("whatsapp:status", "ready");
-      console.log(`[WhatsApp] Ready with ${chatCount} chats after ${Math.round(elapsed / 1000)}s`);
+      console.log(
+        `[WhatsApp] Ready with ${chatCount} chats after ${Math.round(elapsed / 1000)}s`,
+      );
       return;
     }
 
@@ -866,9 +906,7 @@ ipcMain.handle("get-chat-files", async (event, chatId) => {
     const unreadMsgIds = new Set();
     if (unreadCount > 0) {
       const unreadSlice = sortedMsgs.slice(-unreadCount);
-      unreadSlice.forEach((m) =>
-        unreadMsgIds.add(serializeMessageId(m.key)),
-      );
+      unreadSlice.forEach((m) => unreadMsgIds.add(serializeMessageId(m.key)));
     }
 
     const files = [];
@@ -903,10 +941,7 @@ ipcMain.handle("get-chat-files", async (event, chatId) => {
 
       // Check if already downloaded
       const safeMsgId = msgId.replace(/[^a-zA-Z0-9]/g, "_");
-      const expectedPath = path.join(
-        DOWNLOADS_DIR,
-        `${safeMsgId}_${fileName}`,
-      );
+      const expectedPath = path.join(DOWNLOADS_DIR, `${safeMsgId}_${fileName}`);
       const isDownloaded = fs.existsSync(expectedPath);
 
       files.push({
@@ -951,10 +986,15 @@ ipcMain.handle(
         status: "downloading",
       });
 
-      const buffer = await downloadMediaMessage(msg, "buffer", {}, {
-        logger: baileysLogger,
-        reuploadRequest: sock?.updateMediaMessage,
-      });
+      const buffer = await downloadMediaMessage(
+        msg,
+        "buffer",
+        {},
+        {
+          logger: baileysLogger,
+          reuploadRequest: sock?.updateMediaMessage,
+        },
+      );
       if (!buffer) return { error: "Failed to download media" };
 
       let finalFileName = fileName || media.fileName;
@@ -1014,10 +1054,15 @@ ipcMain.handle("download-all-files", async (event, chatId) => {
 
       try {
         const media = getMediaInfo(msg);
-        const buffer = await downloadMediaMessage(msg, "buffer", {}, {
-          logger: baileysLogger,
-          reuploadRequest: sock?.updateMediaMessage,
-        });
+        const buffer = await downloadMediaMessage(
+          msg,
+          "buffer",
+          {},
+          {
+            logger: baileysLogger,
+            reuploadRequest: sock?.updateMediaMessage,
+          },
+        );
 
         if (!buffer) {
           results.push({ messageId: msgId, error: "Failed to download" });
@@ -1262,9 +1307,13 @@ ipcMain.handle("reconnect-whatsapp", async () => {
   try {
     isClientReady = false;
     stopStorePersistence();
-    try { store.writeToFile(getStorePath()); } catch (_) {}
+    try {
+      store.writeToFile(getStorePath());
+    } catch (_) {}
     if (sock) {
-      try { sock.end(undefined); } catch (_) {}
+      try {
+        sock.end(undefined);
+      } catch (_) {}
       sock = null;
     }
     await initWhatsApp();
@@ -1354,7 +1403,11 @@ ipcMain.handle("get-profile-info", async () => {
         const rawUrl = await sock.profilePictureUrl(user.id, "image");
         const pic = await fetchProfilePicAsDataUri(rawUrl);
         if (pic) {
-          mainWindow?.webContents?.send("whatsapp:profile-pic", { jid: user.id, profilePicUrl: pic, isSelf: true });
+          mainWindow?.webContents?.send("whatsapp:profile-pic", {
+            jid: user.id,
+            profilePicUrl: pic,
+            isSelf: true,
+          });
         }
       } catch (_) {}
     })();
@@ -1372,7 +1425,11 @@ ipcMain.handle("get-profile-pic", async (_, jid) => {
   try {
     let rawUrl = null;
     try {
-      rawUrl = await withTimeout(sock.profilePictureUrl(jid, "image"), 3000, null);
+      rawUrl = await withTimeout(
+        sock.profilePictureUrl(jid, "image"),
+        3000,
+        null,
+      );
     } catch (_) {
       // 404/not-found is normal for contacts without profile pics
       return { profilePicUrl: null };
@@ -1389,10 +1446,14 @@ ipcMain.handle("get-profile-pic", async (_, jid) => {
 ipcMain.handle("logout-whatsapp", async () => {
   try {
     if (sock) {
-      try { await sock.logout(); } catch (e) {
+      try {
+        await sock.logout();
+      } catch (e) {
         console.error("Error during logout:", e.message);
       }
-      try { sock.end(undefined); } catch (_) {}
+      try {
+        sock.end(undefined);
+      } catch (_) {}
       sock = null;
     }
   } catch (e) {
@@ -1567,7 +1628,9 @@ function createUpdateWindow() {
 }
 
 autoUpdater.on("download-progress", (progress) => {
-  console.log(`[Updater] Progress: ${Math.round(progress.percent)}% (${(progress.transferred / 1048576).toFixed(1)}/${(progress.total / 1048576).toFixed(1)} MB)`);
+  console.log(
+    `[Updater] Progress: ${Math.round(progress.percent)}% (${(progress.transferred / 1048576).toFixed(1)}/${(progress.total / 1048576).toFixed(1)} MB)`,
+  );
   if (updateWindow && !updateWindow.isDestroyed()) {
     updateWindow.webContents.send("update:download-progress", progress);
   }
@@ -1616,7 +1679,10 @@ ipcMain.handle("check-for-updates", async () => {
     updateWindow.webContents.once("did-finish-load", () => {
       console.log("[Updater] Window loaded, starting download...");
       autoUpdater.downloadUpdate().catch((err) => {
-        console.error("[Updater] downloadUpdate() rejected:", err?.message || err);
+        console.error(
+          "[Updater] downloadUpdate() rejected:",
+          err?.message || err,
+        );
       });
     });
     return { available: true, current, latest };
@@ -1676,9 +1742,13 @@ if (!gotSingleLock) {
 
   app.on("window-all-closed", async () => {
     stopStorePersistence();
-    try { store.writeToFile(getStorePath()); } catch (_) {}
+    try {
+      store.writeToFile(getStorePath());
+    } catch (_) {}
     if (sock) {
-      try { sock.end(undefined); } catch (_) {}
+      try {
+        sock.end(undefined);
+      } catch (_) {}
       sock = null;
     }
     if (process.platform !== "darwin") app.quit();
@@ -1687,21 +1757,29 @@ if (!gotSingleLock) {
   app.on("before-quit", async () => {
     // Save store before quitting
     stopStorePersistence();
-    try { store.writeToFile(getStorePath()); } catch (_) {}
+    try {
+      store.writeToFile(getStorePath());
+    } catch (_) {}
 
     // Close thumbnail window if open
     if (thumbWindow && !thumbWindow.isDestroyed()) {
-      try { thumbWindow.close(); } catch (_) {}
+      try {
+        thumbWindow.close();
+      } catch (_) {}
       thumbWindow = null;
     }
     // Close update window if open
     if (updateWindow && !updateWindow.isDestroyed()) {
-      try { updateWindow.close(); } catch (_) {}
+      try {
+        updateWindow.close();
+      } catch (_) {}
       updateWindow = null;
     }
     // Close socket
     if (sock) {
-      try { sock.end(undefined); } catch (_) {}
+      try {
+        sock.end(undefined);
+      } catch (_) {}
       sock = null;
     }
   });

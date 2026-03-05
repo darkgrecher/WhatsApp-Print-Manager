@@ -676,7 +676,9 @@ async function refreshChats() {
     // If sync is still in progress, auto-retry
     if (chatSyncRetryCount < MAX_SYNC_RETRIES) {
       chatSyncRetryCount++;
-      console.log(`[Chats] Empty result, retrying... (${chatSyncRetryCount}/${MAX_SYNC_RETRIES})`);
+      console.log(
+        `[Chats] Empty result, retrying... (${chatSyncRetryCount}/${MAX_SYNC_RETRIES})`,
+      );
       chatList.innerHTML = `
         <div class="empty-state">
           <div class="spinner"></div>
@@ -706,7 +708,10 @@ async function refreshChats() {
 
   // Chats loaded successfully — reset retry counter
   chatSyncRetryCount = 0;
-  if (syncRetryTimer) { clearTimeout(syncRetryTimer); syncRetryTimer = null; }
+  if (syncRetryTimer) {
+    clearTimeout(syncRetryTimer);
+    syncRetryTimer = null;
+  }
 
   // Store chat data so click handler can look it up
   window._chatData = {};
@@ -1292,7 +1297,9 @@ async function loadChatProfilePics(chats) {
 }
 
 function setChatAvatarImg(jid, picUrl, name) {
-  const avatar = document.querySelector(`.chat-avatar[data-jid="${CSS.escape(jid)}"]`);
+  const avatar = document.querySelector(
+    `.chat-avatar[data-jid="${CSS.escape(jid)}"]`,
+  );
   if (avatar && picUrl) {
     const initials = getInitials(name || "");
     avatar.innerHTML = `<img src="${escapeHtml(picUrl)}" alt="" onerror="this.parentElement.textContent='${initials}'">`;
@@ -1466,7 +1473,10 @@ function switchToLoginScreen() {
 
   // Reset sync retry state
   chatSyncRetryCount = 0;
-  if (syncRetryTimer) { clearTimeout(syncRetryTimer); syncRetryTimer = null; }
+  if (syncRetryTimer) {
+    clearTimeout(syncRetryTimer);
+    syncRetryTimer = null;
+  }
 
   // Switch screens
   document.getElementById("main-screen").classList.remove("active");
