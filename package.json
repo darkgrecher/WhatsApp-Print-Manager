@@ -35,10 +35,7 @@
     ],
     "asar": true,
     "asarUnpack": [
-      "node_modules/**/*.node",
-      "node_modules/puppeteer/**",
-      "node_modules/puppeteer-core/**",
-      "node_modules/whatsapp-web.js/node_modules/puppeteer/**"
+      "node_modules/**/*.node"
     ],
     "win": {
       "target": [
@@ -76,12 +73,14 @@
   "author": "Bookshop",
   "license": "MIT",
   "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^6.6.0",
     "dotenv": "^17.3.1",
     "electron-updater": "^6.8.3",
     "mime-types": "^2.1.35",
     "pdf-to-printer": "^5.6.0",
-    "qrcode": "^1.5.3",
-    "whatsapp-web.js": "^1.26.1-alpha.1"
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.3"
   },
   "devDependencies": {
     "electron": "^28.0.0",

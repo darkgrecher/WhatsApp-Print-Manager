@@ -245,6 +245,19 @@ function setupEventListeners() {
     }
   });
 
+  // ── Profile pic received asynchronously ──
+  window.api.onProfilePic(({ jid, profilePicUrl, isSelf }) => {
+    if (isSelf && profilePicUrl) {
+      const name = document.getElementById("profile-name")?.textContent || "";
+      const initials = getInitials(name);
+      const imgHtml = `<img src="${escapeHtml(profilePicUrl)}" alt="" onerror="this.parentElement.textContent='${initials}'">`;
+      const profileAvatar = document.getElementById("profile-avatar");
+      if (profileAvatar) profileAvatar.innerHTML = imgHtml;
+      const dropdownAvatar = document.getElementById("dropdown-avatar");
+      if (dropdownAvatar) dropdownAvatar.innerHTML = imgHtml;
+    }
+  });
+
   // ── Real-time new message listener ──
   window.api.onNewMessage((data) => {
     console.log("[NewMessage]", data);
@@ -260,6 +273,12 @@ function setupEventListeners() {
     if (currentChatId === data.chatId && data.hasMedia) {
       selectChat(data.chatId, data.chatName || data.sender);
     }
+  });
+
+  // ── Chat list updated (covers all chat/contact changes) ──
+  window.api.onChatsUpdated(() => {
+    console.log("[ChatsUpdated] Refreshing chat list");
+    refreshChats();
   });
 }
 
@@ -591,6 +610,12 @@ function filterFiles(query) {
   }
 }
 
+// Track sync retry state
+let chatSyncRetryCount = 0;
+const MAX_SYNC_RETRIES = 10;
+const SYNC_RETRY_DELAY = 3000; // 3 seconds between retries
+let syncRetryTimer = null;
+
 async function refreshChats() {
   if (isRefreshing) return; // prevent re-entrant calls
   isRefreshing = true;
@@ -648,6 +673,21 @@ async function refreshChats() {
   chatCount.textContent = chats.length;
 
   if (chats.length === 0) {
+    // If sync is still in progress, auto-retry
+    if (chatSyncRetryCount < MAX_SYNC_RETRIES) {
+      chatSyncRetryCount++;
+      console.log(`[Chats] Empty result, retrying... (${chatSyncRetryCount}/${MAX_SYNC_RETRIES})`);
+      chatList.innerHTML = `
+        <div class="empty-state">
+          <div class="spinner"></div>
+          <p style="margin-top:12px">Syncing chats... (attempt ${chatSyncRetryCount}/${MAX_SYNC_RETRIES})</p>
+        </div>
+      `;
+      if (syncRetryTimer) clearTimeout(syncRetryTimer);
+      syncRetryTimer = setTimeout(() => refreshChats(), SYNC_RETRY_DELAY);
+      return;
+    }
+
     chatList.innerHTML = `
       <div class="empty-state">
         <p>No chats found</p>
@@ -657,9 +697,16 @@ async function refreshChats() {
     `;
     document
       .getElementById("btn-refresh-empty")
-      .addEventListener("click", () => refreshChats());
+      .addEventListener("click", () => {
+        chatSyncRetryCount = 0; // reset so manual refresh gets retries
+        refreshChats();
+      });
     return;
   }
+
+  // Chats loaded successfully — reset retry counter
+  chatSyncRetryCount = 0;
+  if (syncRetryTimer) { clearTimeout(syncRetryTimer); syncRetryTimer = null; }
 
   // Store chat data so click handler can look it up
   window._chatData = {};
@@ -670,9 +717,7 @@ async function refreshChats() {
   chatList.innerHTML = chats
     .map((chat) => {
       const initials = getInitials(chat.name);
-      const avatarContent = chat.profilePicUrl
-        ? `<img src="${escapeHtml(chat.profilePicUrl)}" alt="" onerror="this.parentElement.textContent='${initials}'">`
-        : initials;
+      const avatarContent = initials; // profile pic loaded lazily
       const isActive = currentChatId === chat.id ? "active" : "";
       const unreadBadge =
         chat.unreadCount > 0
@@ -684,7 +729,7 @@ async function refreshChats() {
 
       return `
       <div class="chat-item ${isActive}" data-chat-id="${escapeHtml(chat.id)}" data-chat-name="${escapeHtml(chat.name)}">
-        <div class="chat-avatar">${avatarContent}</div>
+        <div class="chat-avatar" data-jid="${escapeHtml(chat.id)}">${avatarContent}</div>
         <div class="chat-info">
           <div class="chat-name">${escapeHtml(chat.name)} ${chat.isGroup ? "👥" : ""}</div>
           <div class="chat-number">${chat.number}</div>
@@ -704,6 +749,9 @@ async function refreshChats() {
       if (chatId) selectChat(chatId, chatName);
     });
   });
+
+  // Lazily load profile pictures for visible chats (non-blocking)
+  loadChatProfilePics(chats);
 }
 
 // ── Select Chat & Load Files ─────────────────────────────────────────────
@@ -1209,6 +1257,48 @@ async function reconnect() {
 }
 
 // ── Profile & Logout ─────────────────────────────────────────────────────
+
+// Cache for loaded profile pictures
+const profilePicCache = {};
+
+/**
+ * Lazily load profile pictures for a list of chats.
+ * Fetches in small batches to avoid hammering the server.
+ */
+async function loadChatProfilePics(chats) {
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < chats.length; i += BATCH_SIZE) {
+    const batch = chats.slice(i, i + BATCH_SIZE);
+    await Promise.all(
+      batch.map(async (chat) => {
+        if (profilePicCache[chat.id] !== undefined) {
+          if (profilePicCache[chat.id]) {
+            setChatAvatarImg(chat.id, profilePicCache[chat.id], chat.name);
+          }
+          return;
+        }
+        try {
+          const result = await window.api.getProfilePic(chat.id);
+          profilePicCache[chat.id] = result.profilePicUrl || null;
+          if (result.profilePicUrl) {
+            setChatAvatarImg(chat.id, result.profilePicUrl, chat.name);
+          }
+        } catch (_) {
+          profilePicCache[chat.id] = null;
+        }
+      }),
+    );
+  }
+}
+
+function setChatAvatarImg(jid, picUrl, name) {
+  const avatar = document.querySelector(`.chat-avatar[data-jid="${CSS.escape(jid)}"]`);
+  if (avatar && picUrl) {
+    const initials = getInitials(name || "");
+    avatar.innerHTML = `<img src="${escapeHtml(picUrl)}" alt="" onerror="this.parentElement.textContent='${initials}'">`;
+  }
+}
+
 async function loadProfileInfo() {
   const result = await window.api.getProfileInfo();
   if (result.error) return;
@@ -1217,21 +1307,13 @@ async function loadProfileInfo() {
   const number = result.number || "";
   const initials = getInitials(name);
 
-  // Update topbar avatar
+  // Update topbar avatar (show initials; pic arrives via IPC event)
   const profileAvatar = document.getElementById("profile-avatar");
-  if (result.profilePicUrl) {
-    profileAvatar.innerHTML = `<img src="${escapeHtml(result.profilePicUrl)}" alt="" onerror="this.parentElement.textContent='${initials}'">`;
-  } else {
-    profileAvatar.textContent = initials;
-  }
+  profileAvatar.textContent = initials;
 
   // Update dropdown
   const dropdownAvatar = document.getElementById("dropdown-avatar");
-  if (result.profilePicUrl) {
-    dropdownAvatar.innerHTML = `<img src="${escapeHtml(result.profilePicUrl)}" alt="" onerror="this.parentElement.textContent='${initials}'">`;
-  } else {
-    dropdownAvatar.textContent = initials;
-  }
+  dropdownAvatar.textContent = initials;
 
   document.getElementById("profile-name").textContent = name;
   document.getElementById("profile-number").textContent = number
@@ -1376,6 +1458,15 @@ function switchToLoginScreen() {
   selectedFiles.clear();
   allSelected = false;
   stopAutoRefresh();
+
+  // Clear profile pic cache so stale pics from a previous account don't show
+  for (const key of Object.keys(profilePicCache)) {
+    delete profilePicCache[key];
+  }
+
+  // Reset sync retry state
+  chatSyncRetryCount = 0;
+  if (syncRetryTimer) { clearTimeout(syncRetryTimer); syncRetryTimer = null; }
 
   // Switch screens
   document.getElementById("main-screen").classList.remove("active");

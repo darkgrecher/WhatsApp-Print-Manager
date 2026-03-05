@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("download:bulk-progress", (_, data) => callback(data)),
   onNewMessage: (callback) =>
     ipcRenderer.on("whatsapp:new-message", (_, data) => callback(data)),
+  onProfilePic: (callback) =>
+    ipcRenderer.on("whatsapp:profile-pic", (_, data) => callback(data)),
+  onChatsUpdated: (callback) =>
+    ipcRenderer.on("whatsapp:chats-updated", () => callback()),
 
   // ── WhatsApp Actions ──
   getUnreadChats: () => ipcRenderer.invoke("get-unread-chats"),
@@ -28,6 +32,7 @@ contextBridge.exposeInMainWorld("api", {
   reconnectWhatsApp: () => ipcRenderer.invoke("reconnect-whatsapp"),
   getWhatsAppStatus: () => ipcRenderer.invoke("get-whatsapp-status"),
   getProfileInfo: () => ipcRenderer.invoke("get-profile-info"),
+  getProfilePic: (jid) => ipcRenderer.invoke("get-profile-pic", jid),
   logoutWhatsApp: () => ipcRenderer.invoke("logout-whatsapp"),
 
   // ── Print Actions ──
