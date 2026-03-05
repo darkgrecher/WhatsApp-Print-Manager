@@ -10,6 +10,7 @@ const { autoUpdater } = require("electron-updater");
 // ── Globals ──────────────────────────────────────────────────────────────────
 let mainWindow;
 let updateWindow;
+let updateCancelled = false;
 let whatsappClient;
 let isClientReady = false;
 let DOWNLOADS_DIR;
@@ -1228,6 +1229,7 @@ process.on("uncaughtException", (err) => {
 });
 
 // ── Auto-Updater ─────────────────────────────────────────────────────────────
+autoUpdater.logger = console;
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
 
@@ -1238,7 +1240,7 @@ function createUpdateWindow() {
   }
   updateWindow = new BrowserWindow({
     width: 400,
-    height: 220,
+    height: 260,
     resizable: false,
     minimizable: false,
     maximizable: false,
@@ -1258,22 +1260,30 @@ function createUpdateWindow() {
 }
 
 autoUpdater.on("download-progress", (progress) => {
+  console.log(`[Updater] Progress: ${Math.round(progress.percent)}% (${(progress.transferred / 1048576).toFixed(1)}/${(progress.total / 1048576).toFixed(1)} MB)`);
   if (updateWindow && !updateWindow.isDestroyed()) {
     updateWindow.webContents.send("update:download-progress", progress);
   }
 });
 
-autoUpdater.on("update-downloaded", () => {
+autoUpdater.on("update-downloaded", (info) => {
+  console.log("[Updater] Download complete:", info?.version);
   if (updateWindow && !updateWindow.isDestroyed()) {
     updateWindow.webContents.send("update:downloaded");
   }
   // Wait a moment so user sees "Installing..." then quit-and-install
   setTimeout(() => {
     autoUpdater.quitAndInstall(false, true);
-  }, 2000);
+  }, 3000);
 });
 
 autoUpdater.on("error", (err) => {
+  console.error("[Updater] Error:", err?.message || err);
+  // Don't send error to window if user cancelled
+  if (updateCancelled) {
+    updateCancelled = false;
+    return;
+  }
   if (updateWindow && !updateWindow.isDestroyed()) {
     updateWindow.webContents.send(
       "update:error",
@@ -1284,18 +1294,28 @@ autoUpdater.on("error", (err) => {
 
 ipcMain.handle("check-for-updates", async () => {
   try {
+    console.log("[Updater] Checking for updates...");
     const result = await autoUpdater.checkForUpdates();
     if (!result || !result.updateInfo) {
+      console.log("[Updater] No update info returned");
       return { available: false };
     }
     const latest = result.updateInfo.version;
     const current = app.getVersion();
+    console.log(`[Updater] Current: ${current}, Latest: ${latest}`);
     if (latest === current) {
       return { available: false, current };
     }
     // Update is available — open progress window and start download
     createUpdateWindow();
-    autoUpdater.downloadUpdate();
+    // Wait for window to finish loading before starting download
+    updateCancelled = false;
+    updateWindow.webContents.once("did-finish-load", () => {
+      console.log("[Updater] Window loaded, starting download...");
+      autoUpdater.downloadUpdate().catch((err) => {
+        console.error("[Updater] downloadUpdate() rejected:", err?.message || err);
+      });
+    });
     return { available: true, current, latest };
   } catch (err) {
     console.error("[Updater] Check failed:", err.message);
@@ -1305,6 +1325,14 @@ ipcMain.handle("check-for-updates", async () => {
 
 ipcMain.handle("get-app-version", () => {
   return app.getVersion();
+});
+
+ipcMain.on("cancel-update", () => {
+  console.log("[Updater] User cancelled download");
+  updateCancelled = true;
+  if (updateWindow && !updateWindow.isDestroyed()) {
+    updateWindow.close();
+  }
 });
 
 // ── App Lifecycle ────────────────────────────────────────────────────────────
