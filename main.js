@@ -15,6 +15,11 @@ let whatsappClient;
 let isClientReady = false;
 let DOWNLOADS_DIR;
 
+// Cache for enriched chat data (profile pic, resolved name, last message).
+// Survives across refreshChats() calls so the UI doesn't lose enrichment.
+const enrichedChatCache = new Map();
+let enrichmentInProgress = false;
+
 // License server URL (change this to your production backend URL)
 const LICENSE_API_URL = "https://whatsapp-print-admin.vercel.app/api";
 
@@ -423,13 +428,56 @@ ipcMain.handle("get-unread-chats", async () => {
       .filter((c) => c.id._serialized !== "status@broadcast")
       .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
-    // Process all chats in parallel with individual timeouts
-    const result = await Promise.all(
-      allChats.map(async (chat) => {
+    // Build chat objects, merging cached enrichment data when available.
+    // Chats that haven't been enriched yet use basic fallback values.
+    const result = allChats.map((chat) => {
+      const contactNumber = chat.id.user || chat.id._serialized;
+      const cached = enrichedChatCache.get(chat.id._serialized);
+
+      return {
+        id: chat.id._serialized,
+        name: cached?.name || chat.name || contactNumber,
+        number: contactNumber,
+        whatsappName: cached?.whatsappName || "",
+        unreadCount: chat.unreadCount,
+        isGroup: chat.isGroup,
+        profilePicUrl: cached?.profilePicUrl || null,
+        timestamp: chat.timestamp,
+        lastMessage: cached?.lastMessage || "",
+      };
+    });
+
+    // On first load (cache empty), kick off background enrichment.
+    // On subsequent refreshes the cache already has everything, so skip.
+    if (!enrichmentInProgress && enrichedChatCache.size === 0) {
+      enrichChatsInBackground(allChats);
+    }
+
+    return { chats: result };
+  } catch (err) {
+    const isDetached =
+      err && err.message && err.message.includes("detached Frame");
+    if (isDetached) {
+      console.warn("[get-unread-chats] Skipping refresh due to detached frame");
+      return { chats: [], skipped: true };
+    }
+    console.error("Error getting unread chats:", err);
+    return { error: err.message };
+  }
+});
+
+// Background enrichment: fetches contact info, profile pics, and last messages
+// in batches and streams updates to the renderer. Results are cached so
+// subsequent refreshChats() calls return enriched data instantly.
+const ENRICH_BATCH_SIZE = 10;
+async function enrichChatsInBackground(allChats) {
+  enrichmentInProgress = true;
+  for (let i = 0; i < allChats.length; i += ENRICH_BATCH_SIZE) {
+    const batch = allChats.slice(i, i + ENRICH_BATCH_SIZE);
+    const enriched = await Promise.all(
+      batch.map(async (chat) => {
         let contactNumber = chat.id.user || chat.id._serialized;
-        // savedName = name from phone contacts or chat name
         let savedName = chat.name || "";
-        // whatsappName = pushname set by the user on WhatsApp
         let whatsappName = "";
         let profilePicUrl = null;
 
@@ -437,7 +485,6 @@ ipcMain.handle("get-unread-chats", async () => {
           const contact = await withTimeout(chat.getContact(), 5000, null);
           if (contact) {
             whatsappName = contact.pushname || "";
-            // If savedName is empty or just the number, try contact.name
             if (!savedName || savedName === contactNumber) {
               savedName = contact.name || "";
             }
@@ -452,11 +499,8 @@ ipcMain.handle("get-unread-chats", async () => {
               null,
             );
           }
-        } catch (e) {
-          // Contact info not available, continue with defaults
-        }
+        } catch (e) {}
 
-        // Get last message preview (with timeout)
         let lastMessage = "";
         try {
           const msgs = await withTimeout(
@@ -471,37 +515,29 @@ ipcMain.handle("get-unread-chats", async () => {
           }
         } catch (e) {}
 
-        // Determine a display name (fallback chain)
         const displayName = savedName || whatsappName || contactNumber;
 
-        return {
+        const enrichedData = {
           id: chat.id._serialized,
           name: displayName,
           number: contactNumber,
-          whatsappName: whatsappName,
-          unreadCount: chat.unreadCount,
-          isGroup: chat.isGroup,
+          whatsappName,
           profilePicUrl: profilePicUrl || null,
-          timestamp: chat.timestamp,
           lastMessage,
         };
+
+        // Store in cache
+        enrichedChatCache.set(chat.id._serialized, enrichedData);
+
+        return enrichedData;
       }),
     );
 
-    // Sort by most recent first
-    result.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-    return { chats: result };
-  } catch (err) {
-    const isDetached =
-      err && err.message && err.message.includes("detached Frame");
-    if (isDetached) {
-      console.warn("[get-unread-chats] Skipping refresh due to detached frame");
-      return { chats: [], skipped: true };
-    }
-    console.error("Error getting unread chats:", err);
-    return { error: err.message };
+    // Send this batch to the renderer for live UI updates
+    mainWindow?.webContents.send("whatsapp:chat-enriched", enriched);
   }
-});
+  enrichmentInProgress = false;
+}
 
 // Get ALL chats (not just unread) — for the "All Chats" view
 ipcMain.handle("get-all-chats", async (event, { limit = 30 } = {}) => {
@@ -541,24 +577,31 @@ ipcMain.handle("get-all-chats", async (event, { limit = 30 } = {}) => {
   }
 });
 
-// Get messages with media for a specific chat
+// Get messages with media for a specific chat.
+// Returns unread files immediately, then streams older files in batches
+// via 'whatsapp:chat-files-batch' events for progressive rendering.
 ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
   if (!isClientReady) return { error: "WhatsApp not ready" };
 
   try {
+    const _t0 = Date.now();
+    console.log(`[Files] START chatId=${chatId}`);
+
     const chat = await retryOnDetachedFrame(() =>
       whatsappClient.getChatById(chatId),
     );
+    console.log(`[Files] getChatById done in ${Date.now()-_t0}ms`);
+
     const unreadCount = chat.unreadCount || 0;
     // Fetch messages (limit to last 50 for performance)
     const messages = await retryOnDetachedFrame(() =>
       chat.fetchMessages({ limit: 50 }),
     );
+    console.log(`[Files] fetchMessages done in ${Date.now()-_t0}ms — total msgs: ${messages.length}`);
 
     // Determine which messages are unread by merging two sources:
     // 1) The last `unreadCount` messages (from whatsapp-web.js chat state)
     // 2) Client-tracked message IDs received via real-time onNewMessage events
-    // This ensures all files are tagged even if chat.unreadCount is stale.
     const sortedMsgs = [...messages].sort(
       (a, b) => (a.timestamp || 0) - (b.timestamp || 0),
     );
@@ -567,76 +610,119 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
       const unreadSlice = sortedMsgs.slice(-unreadCount);
       unreadSlice.forEach((m) => unreadMsgIds.add(m.id._serialized));
     }
-    // Merge client-tracked IDs (handles cases where unreadCount was reset)
     if (Array.isArray(trackedUnreadIds)) {
       trackedUnreadIds.forEach((id) => unreadMsgIds.add(id));
     }
 
-    const files = [];
-    for (const msg of messages) {
-      if (msg.hasMedia) {
-        let senderName = "Unknown";
-        try {
-          const contact = await msg.getContact();
-          senderName =
-            contact.pushname || contact.name || contact.number || "Unknown";
-        } catch (e) {}
+    // Helper: extract file info from a message without contact resolution
+    function extractFileInfo(msg) {
+      const mediaInfo = {
+        messageId: msg.id._serialized,
+        chatId: chatId,
+        sender: "Unknown",
+        timestamp: msg.timestamp,
+        type: msg.type,
+        caption: msg.body || "",
+        fileName: null,
+        mimeType: null,
+        fileSize: null,
+        isDownloaded: false,
+        localPath: null,
+      };
 
-        // Determine file info from message
-        const mediaInfo = {
-          messageId: msg.id._serialized,
-          chatId: chatId,
-          sender: senderName,
-          timestamp: msg.timestamp,
-          type: msg.type, // image, video, document, audio, sticker, ptt
-          caption: msg.body || "",
-          fileName: null,
-          mimeType: null,
-          fileSize: null,
-          isDownloaded: false,
-          localPath: null,
-        };
+      if (msg._data?.fileName) mediaInfo.fileName = msg._data.fileName;
+      if (msg._data?.mimetype) mediaInfo.mimeType = msg._data.mimetype;
+      if (msg._data?.size) mediaInfo.fileSize = msg._data.size;
 
-        // Try to get document info
-        if (msg._data?.fileName) {
-          mediaInfo.fileName = msg._data.fileName;
-        }
-        if (msg._data?.mimetype) {
-          mediaInfo.mimeType = msg._data.mimetype;
-        }
-        if (msg._data?.size) {
-          mediaInfo.fileSize = msg._data.size;
-        }
-
-        // Generate a default filename if none exists
-        if (!mediaInfo.fileName) {
-          const ext =
-            mime.extension(mediaInfo.mimeType || "application/octet-stream") ||
-            "bin";
-          const typePrefix = mediaInfo.type || "file";
-          mediaInfo.fileName = `${typePrefix}_${msg.timestamp}.${ext}`;
-        }
-
-        // Check if already downloaded
-        const expectedPath = path.join(
-          DOWNLOADS_DIR,
-          `${msg.id._serialized.replace(/[^a-zA-Z0-9]/g, "_")}_${mediaInfo.fileName}`,
-        );
-        if (fs.existsSync(expectedPath)) {
-          mediaInfo.isDownloaded = true;
-          mediaInfo.localPath = expectedPath;
-        }
-
-        // Tag whether this file is from an unread message
-        mediaInfo.isUnread = unreadMsgIds.has(msg.id._serialized);
-
-        files.push(mediaInfo);
+      if (!mediaInfo.fileName) {
+        const ext =
+          mime.extension(mediaInfo.mimeType || "application/octet-stream") ||
+          "bin";
+        mediaInfo.fileName = `${mediaInfo.type || "file"}_${msg.timestamp}.${ext}`;
       }
+
+      const expectedPath = path.join(
+        DOWNLOADS_DIR,
+        `${msg.id._serialized.replace(/[^a-zA-Z0-9]/g, "_")}_${mediaInfo.fileName}`,
+      );
+      if (fs.existsSync(expectedPath)) {
+        mediaInfo.isDownloaded = true;
+        mediaInfo.localPath = expectedPath;
+      }
+
+      mediaInfo.isUnread = unreadMsgIds.has(msg.id._serialized);
+      return mediaInfo;
     }
 
-    // Sort by timestamp descending (newest first)
-    files.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-    return { files, unreadCount };
+    // Separate media messages into unread and older
+    const mediaMessages = messages.filter((m) => m.hasMedia);
+    const unreadMediaMsgs = mediaMessages.filter((m) =>
+      unreadMsgIds.has(m.id._serialized),
+    );
+    const olderMediaMsgs = mediaMessages.filter(
+      (m) => !unreadMsgIds.has(m.id._serialized),
+    );
+    console.log(`[Files] media split: ${unreadMediaMsgs.length} unread, ${olderMediaMsgs.length} older`);
+
+    // Phase 1: Return unread files immediately (fast — no contact resolution)
+    const unreadFiles = unreadMediaMsgs.map(extractFileInfo);
+    unreadFiles.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    // Phase 2: Stream older files in date-grouped batches (background)
+    // Sort older messages newest-first so today's files arrive before yesterday's
+    olderMediaMsgs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    // Pre-compute older file info (synchronous, fast — no contact resolution)
+    const allOlderFiles = olderMediaMsgs.map(extractFileInfo);
+    console.log(`[Files] extractFileInfo done in ${Date.now()-_t0}ms — ${allOlderFiles.length} older files queued`);
+
+    // Resolve contact names for ALL files in background (unread + older)
+    (async () => {
+      const allMediaMsgs = [...unreadMediaMsgs, ...olderMediaMsgs];
+      for (const msg of allMediaMsgs) {
+        try {
+          const contact = await msg.getContact();
+          const name =
+            contact.pushname || contact.name || contact.number || "Unknown";
+          mainWindow?.webContents.send("whatsapp:file-sender-resolved", {
+            chatId,
+            messageId: msg.id._serialized,
+            sender: name,
+          });
+        } catch (e) {}
+      }
+    })();
+
+    // Return Phase 1 immediately so the renderer can render unread files.
+    // Use setImmediate to send older-file batches AFTER the invoke reply has
+    // been dispatched — this prevents a race where batches arrive at the
+    // renderer before selectChat() has set up the DOM, causing the batches
+    // to be silently wiped when selectChat() does fileList.innerHTML = html.
+    console.log(`[Files] returning Phase 1 at ${Date.now()-_t0}ms — ${unreadFiles.length} unread, hasOlderFiles=${olderMediaMsgs.length > 0}`);
+    setImmediate(() => {
+      const FILE_BATCH_SIZE = 10;
+      if (allOlderFiles.length > 0) {
+        for (let i = 0; i < allOlderFiles.length; i += FILE_BATCH_SIZE) {
+          const batchFiles = allOlderFiles.slice(i, i + FILE_BATCH_SIZE);
+          const isDone = i + FILE_BATCH_SIZE >= allOlderFiles.length;
+          console.log(`[Files] sending batch at i=${i}, size=${batchFiles.length}, done=${isDone}`);
+          mainWindow?.webContents.send("whatsapp:chat-files-batch", {
+            chatId,
+            files: batchFiles,
+            done: isDone,
+          });
+        }
+      } else {
+        console.log(`[Files] no older files — sending done signal`);
+        mainWindow?.webContents.send("whatsapp:chat-files-batch", {
+          chatId,
+          files: [],
+          done: true,
+        });
+      }
+    });
+
+    return { files: unreadFiles, unreadCount, hasOlderFiles: olderMediaMsgs.length > 0 };
   } catch (err) {
     console.error("Error getting chat files:", err);
     return { error: err.message };
@@ -1006,6 +1092,9 @@ ipcMain.handle("reconnect-whatsapp", async () => {
       await whatsappClient.destroy();
     }
     isClientReady = false;
+    // Clear cached chat enrichment so the new session starts fresh
+    enrichedChatCache.clear();
+    enrichmentInProgress = false;
     initWhatsApp();
     return { success: true };
   } catch (err) {
@@ -1114,6 +1203,10 @@ ipcMain.handle("logout-whatsapp", async () => {
   }
 
   isClientReady = false;
+
+  // Clear cached chat enrichment so the new account starts completely fresh
+  enrichedChatCache.clear();
+  enrichmentInProgress = false;
 
   // Clear auth data so a new QR is shown
   const authPath = getUserDataPath(".wwebjs_auth");

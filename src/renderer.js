@@ -248,6 +248,131 @@ function setupEventListeners() {
     }
   });
 
+  // ── Progressive chat enrichment ──
+  // As the backend streams enriched chat data (profile pics, last messages,
+  // resolved names), update each chat item in-place without rebuilding.
+  window.api.onChatEnriched((batch) => {
+    for (const data of batch) {
+      const el = document.querySelector(
+        `.chat-item[data-chat-id="${CSS.escape(data.id)}"]`,
+      );
+      if (!el) continue;
+
+      // Update stored chat data
+      if (window._chatData && window._chatData[data.id]) {
+        Object.assign(window._chatData[data.id], data);
+      }
+
+      // Update display name if enrichment resolved a better one
+      if (data.name) {
+        const nameEl = el.querySelector(".chat-name");
+        if (nameEl) {
+          const isGroup = nameEl.textContent.includes("\uD83D\uDC65");
+          nameEl.textContent = data.name + (isGroup ? " \uD83D\uDC65" : "");
+        }
+        el.dataset.chatName = data.name;
+      }
+
+      // Update profile picture
+      if (data.profilePicUrl) {
+        const avatarEl = el.querySelector(".chat-avatar");
+        if (avatarEl) {
+          const initials = getInitials(data.name || "");
+          avatarEl.innerHTML = `<img src="${escapeHtml(data.profilePicUrl)}" alt="" onerror="this.parentElement.textContent='${initials}'">`;
+        }
+      }
+
+      // Update last message preview
+      if (data.lastMessage) {
+        let lastMsgEl = el.querySelector(".chat-last-msg");
+        if (lastMsgEl) {
+          lastMsgEl.textContent = data.lastMessage;
+        } else {
+          const chatInfo = el.querySelector(".chat-info");
+          if (chatInfo) {
+            const div = document.createElement("div");
+            div.className = "chat-last-msg";
+            div.textContent = data.lastMessage;
+            chatInfo.appendChild(div);
+          }
+        }
+      }
+    }
+  });
+
+  // ── Progressive file loading ──
+  // Older files arrive in batches via IPC after unread files were returned.
+  window.api.onChatFilesBatch(({ chatId, files, done }) => {
+    console.log(`[onChatFilesBatch] chatId=${chatId} files=${files.length} done=${done} (currentChatId=${currentChatId})`);
+    // Ignore batches for a chat we're no longer viewing
+    if (chatId !== currentChatId) return;
+
+    if (files.length > 0) {
+      // Add to currentFiles
+      currentFiles.push(...files);
+      document.getElementById("file-count").textContent =
+        `${currentFiles.length} file${currentFiles.length !== 1 ? "s" : ""}`;
+
+      // Append to the "Previously Seen" section in the DOM
+      const fileList = document.getElementById("file-list");
+      let seenHeader = fileList.querySelector(".seen-section");
+      const hasUnread = fileList.querySelector(".new-section");
+      if (!seenHeader && hasUnread) {
+        // Create the section header only when there are unread files above
+        const headerHtml = `<div class="file-section-header seen-section">
+          <span class="section-icon">📂</span>
+          <span>Previously Seen (<span class="seen-count">${files.length}</span>)</span>
+        </div>`;
+        const loadingEl = fileList.querySelector(".older-files-loading");
+        if (loadingEl) {
+          loadingEl.insertAdjacentHTML("beforebegin", headerHtml);
+        } else {
+          fileList.insertAdjacentHTML("beforeend", headerHtml);
+        }
+        seenHeader = fileList.querySelector(".seen-section");
+      } else if (seenHeader) {
+        // Update the count in existing header
+        const countEl = seenHeader.querySelector(".seen-count");
+        const seenFiles = currentFiles.filter((f) => !f.isUnread);
+        if (countEl) countEl.textContent = seenFiles.length;
+      }
+
+      // Render batch files grouped by date, merging into existing date groups
+      const loadingEl = fileList.querySelector(".older-files-loading");
+      appendFilesGrouped(files, fileList, loadingEl);
+
+      // Attach event listeners to newly added items
+      attachFileEventListeners(fileList);
+    }
+
+    // Remove loading indicator when done
+    if (done) {
+      const fileList = document.getElementById("file-list");
+      const loadingEl = fileList.querySelector(".older-files-loading");
+      if (loadingEl) loadingEl.remove();
+
+      // Load thumbnails for any new PDF files
+      loadDocumentThumbnails();
+    }
+  });
+
+  // ── Sender name resolution for unread files ──
+  window.api.onFileSenderResolved(({ chatId, messageId, sender }) => {
+    if (chatId !== currentChatId) return;
+    // Update in currentFiles
+    const file = currentFiles.find((f) => f.messageId === messageId);
+    if (file) file.sender = sender;
+    // Update in DOM
+    const safeMsgId = messageId.replace(/[^a-zA-Z0-9]/g, "_");
+    const el = document.querySelector(`#file-${safeMsgId} .file-meta`);
+    if (el) {
+      const fromSpan = [...el.querySelectorAll("span")].find((s) =>
+        s.textContent.startsWith("From:"),
+      );
+      if (fromSpan) fromSpan.textContent = `From: ${sender}`;
+    }
+  });
+
   // ── Real-time new message listener ──
   window.api.onNewMessage((data) => {
     console.log("[NewMessage]", data);
@@ -837,40 +962,74 @@ async function selectChat(chatId, chatName) {
   const trackedIds = pendingUnreadIds.has(chatId)
     ? [...pendingUnreadIds.get(chatId)]
     : [];
+  const _selectT0 = Date.now();
+  console.log(`[selectChat] invoking getChatFiles for ${chatId}`);
   const result = await window.api.getChatFiles(chatId, trackedIds);
+  console.log(`[selectChat] getChatFiles resolved in ${Date.now()-_selectT0}ms — unread: ${result.files?.length ?? 0}, hasOlderFiles: ${result.hasOlderFiles}`);
 
   if (result.error) {
     fileList.innerHTML = `<div class="empty-state"><p>Error: ${result.error}</p></div>`;
     return;
   }
 
-  currentFiles = result.files || [];
-  document.getElementById("file-count").textContent =
-    `${currentFiles.length} file${currentFiles.length !== 1 ? "s" : ""}`;
+  const unreadFiles = result.files || [];
+  const hasOlderFiles = result.hasOlderFiles || false;
 
-  if (currentFiles.length === 0) {
+  currentFiles = [...unreadFiles];
+
+  // Handle case where no unread files AND no older files expected
+  if (unreadFiles.length === 0 && !hasOlderFiles) {
     fileList.innerHTML = `
       <div class="empty-state">
         <p>No media files found in this chat</p>
       </div>
     `;
+    document.getElementById("file-count").textContent = "0 files";
     return;
   }
 
-  // Auto-select all unread files that are already downloaded
-  const unreadDownloaded = currentFiles.filter(
+  // Auto-select all unread files that are already downloaded BEFORE rendering
+  // so the checkboxes and "selected" class are correct in the initial HTML.
+  const unreadDownloaded = unreadFiles.filter(
     (f) => f.isUnread && f.isDownloaded,
   );
   if (unreadDownloaded.length > 0) {
     unreadDownloaded.forEach((f) => selectedFiles.add(f.messageId));
+  }
+
+  // Build initial HTML: unread files first, then loading indicator if older files coming
+  let html = "";
+
+  if (unreadFiles.length > 0) {
+    html += `<div class="file-section-header new-section">
+      <span class="section-icon">🔔</span>
+      <span>New Files (${unreadFiles.length})</span>
+    </div>`;
+    html += renderFilesGroupedByDate(unreadFiles);
+  }
+
+  if (hasOlderFiles) {
+    html += `<div class="older-files-loading">
+      <div class="spinner" style="width:20px;height:20px;border-width:2px"></div>
+      <span style="margin-left:8px;color:var(--text-secondary)">Loading older files...</span>
+    </div>`;
+  }
+
+  fileList.innerHTML = html;
+  attachFileEventListeners(fileList);
+
+  document.getElementById("file-count").textContent =
+    `${currentFiles.length} file${currentFiles.length !== 1 ? "s" : ""}`;
+
+  if (unreadDownloaded.length > 0) {
     showToast(
       `Auto-selected ${unreadDownloaded.length} new file(s). Unselect any you don't need.`,
       "info",
     );
   }
 
-  renderFiles();
   updatePrintButton();
+  loadDocumentThumbnails();
 
   // Mark chat as read AFTER loading files (so unread tagging is accurate)
   window.api.markChatRead(chatId);
@@ -927,6 +1086,39 @@ function renderFileItem(file) {
   `;
 }
 
+// Attach action + click-to-select listeners to file items within a container.
+// Safe to call multiple times — uses event delegation markers to avoid duplication.
+function attachFileEventListeners(container) {
+  container.querySelectorAll("[data-action]").forEach((el) => {
+    if (el.dataset.listenerAttached) return;
+    el.dataset.listenerAttached = "1";
+    if (el.tagName === "INPUT") {
+      el.addEventListener("change", handleFileAction);
+    } else {
+      el.addEventListener("click", handleFileAction);
+    }
+  });
+
+  container.querySelectorAll(".file-item").forEach((el) => {
+    if (el.dataset.clickAttached) return;
+    el.dataset.clickAttached = "1";
+    el.addEventListener("click", (e) => {
+      if (
+        e.target.closest(".file-actions") ||
+        e.target.closest(".file-checkbox")
+      )
+        return;
+      const msgId = el.dataset.messageId;
+      const file = currentFiles.find((f) => f.messageId === msgId);
+      if (file && file.isDownloaded) {
+        toggleFileSelect(msgId);
+        const checkbox = el.querySelector(".file-checkbox");
+        if (checkbox) checkbox.checked = selectedFiles.has(msgId);
+      }
+    });
+  });
+}
+
 function renderFiles() {
   const fileList = document.getElementById("file-list");
 
@@ -956,37 +1148,7 @@ function renderFiles() {
   }
 
   fileList.innerHTML = html;
-
-  // Attach event listeners via delegation on buttons
-  fileList.querySelectorAll("[data-action]").forEach((el) => {
-    if (el.tagName === "INPUT") {
-      el.addEventListener("change", handleFileAction);
-    } else {
-      el.addEventListener("click", handleFileAction);
-    }
-  });
-
-  // Click anywhere on card to toggle selection
-  fileList.querySelectorAll(".file-item").forEach((el) => {
-    el.addEventListener("click", (e) => {
-      // Don't toggle if clicking on action buttons or checkbox
-      if (
-        e.target.closest(".file-actions") ||
-        e.target.closest(".file-checkbox")
-      )
-        return;
-
-      const msgId = el.dataset.messageId;
-      const file = currentFiles.find((f) => f.messageId === msgId);
-      if (file && file.isDownloaded) {
-        toggleFileSelect(msgId);
-        const checkbox = el.querySelector(".file-checkbox");
-        if (checkbox) checkbox.checked = selectedFiles.has(msgId);
-      }
-    });
-  });
-
-  // Load document thumbnails asynchronously
+  attachFileEventListeners(fileList);
   loadDocumentThumbnails();
 }
 
@@ -1477,7 +1639,20 @@ function switchToLoginScreen() {
   currentFiles = [];
   selectedFiles.clear();
   allSelected = false;
+  pendingUnreadIds.clear();
+  if (newMessageRefreshTimer) { clearTimeout(newMessageRefreshTimer); newMessageRefreshTimer = null; }
+  if (newMessageFileReloadTimer) { clearTimeout(newMessageFileReloadTimer); newMessageFileReloadTimer = null; }
   stopAutoRefresh();
+
+  // Clear chat list so old account's chats don't show for the new account
+  const oldChatList = document.getElementById("chat-list");
+  if (oldChatList) oldChatList.innerHTML = "";
+  const oldFileList = document.getElementById("file-list");
+  if (oldFileList) oldFileList.innerHTML = "";
+  const noChatSel = document.getElementById("no-chat-selected");
+  if (noChatSel) noChatSel.classList.remove("hidden");
+  const filesSection = document.getElementById("files-section");
+  if (filesSection) filesSection.classList.add("hidden");
 
   // Switch screens
   document.getElementById("main-screen").classList.remove("active");
@@ -1665,12 +1840,48 @@ function renderFilesGroupedByDate(files) {
   }
 
   let html = "";
-  for (const [, groupFiles] of groups) {
+  for (const [key, groupFiles] of groups) {
     const label = formatDateLabel(groupFiles[0].timestamp);
-    html += `<div class="date-separator"><span class="date-separator-label">${escapeHtml(label)}</span></div>`;
+    html += `<div class="date-separator" data-date-key="${escapeHtml(key)}"><span class="date-separator-label">${escapeHtml(label)}</span></div>`;
     html += groupFiles.map(renderFileItem).join("");
   }
   return html;
+}
+
+// Append files into a container, merging into existing date-separator groups
+// instead of creating duplicate separators for the same day.
+function appendFilesGrouped(files, container, beforeEl) {
+  // Group incoming files by date key
+  const groups = new Map();
+  for (const file of files) {
+    const key = getDateKey(file.timestamp);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(file);
+  }
+
+  for (const [key, groupFiles] of groups) {
+    const label = formatDateLabel(groupFiles[0].timestamp);
+    const filesHtml = groupFiles.map(renderFileItem).join("");
+    const existingSep = container.querySelector(`.date-separator[data-date-key="${CSS.escape(key)}"]`);
+    if (existingSep) {
+      // Find the last file-item that belongs to this separator
+      // (every sibling .file-item or .date-separator until the next separator)
+      let insertAfter = existingSep;
+      let sibling = existingSep.nextElementSibling;
+      while (sibling && !sibling.classList.contains("date-separator")) {
+        if (sibling.classList.contains("file-item")) insertAfter = sibling;
+        sibling = sibling.nextElementSibling;
+      }
+      insertAfter.insertAdjacentHTML("afterend", filesHtml);
+    } else {
+      const html = `<div class="date-separator" data-date-key="${escapeHtml(key)}"><span class="date-separator-label">${escapeHtml(label)}</span></div>${filesHtml}`;
+      if (beforeEl) {
+        beforeEl.insertAdjacentHTML("beforebegin", html);
+      } else {
+        container.insertAdjacentHTML("beforeend", html);
+      }
+    }
+  }
 }
 
 function formatTime(timestamp) {

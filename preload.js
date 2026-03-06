@@ -16,6 +16,12 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("download:bulk-progress", (_, data) => callback(data)),
   onNewMessage: (callback) =>
     ipcRenderer.on("whatsapp:new-message", (_, data) => callback(data)),
+  onChatEnriched: (callback) =>
+    ipcRenderer.on("whatsapp:chat-enriched", (_, data) => callback(data)),
+  onChatFilesBatch: (callback) =>
+    ipcRenderer.on("whatsapp:chat-files-batch", (_, data) => callback(data)),
+  onFileSenderResolved: (callback) =>
+    ipcRenderer.on("whatsapp:file-sender-resolved", (_, data) => callback(data)),
 
   // ── WhatsApp Actions ──
   getUnreadChats: () => ipcRenderer.invoke("get-unread-chats"),
