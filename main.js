@@ -126,6 +126,19 @@ function initWhatsApp(retryAttempt = 1) {
         "--disable-accelerated-2d-canvas",
         "--no-first-run",
         "--disable-gpu",
+        // Prevent the zygote process launcher from crashing on fresh Windows
+        // installs where the sandbox environment is restricted.
+        "--no-zygote",
+        // Avoid the Viz display compositor which can crash on machines without
+        // proper GPU drivers or VC++ runtimes.
+        "--disable-features=VizDisplayCompositor",
+        // Suppress first-run welcome UI and background app mode prompts.
+        "--disable-extensions",
+        "--disable-default-apps",
+        "--no-default-browser-check",
+        // Give the headless window an explicit size so Chrome doesn't fail
+        // on systems with no display or unusual display configurations.
+        "--window-size=1280,800",
       ],
     },
   });
