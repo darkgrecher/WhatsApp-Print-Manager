@@ -590,14 +590,16 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
     const chat = await retryOnDetachedFrame(() =>
       whatsappClient.getChatById(chatId),
     );
-    console.log(`[Files] getChatById done in ${Date.now()-_t0}ms`);
+    console.log(`[Files] getChatById done in ${Date.now() - _t0}ms`);
 
     const unreadCount = chat.unreadCount || 0;
     // Fetch messages (limit to last 50 for performance)
     const messages = await retryOnDetachedFrame(() =>
       chat.fetchMessages({ limit: 50 }),
     );
-    console.log(`[Files] fetchMessages done in ${Date.now()-_t0}ms — total msgs: ${messages.length}`);
+    console.log(
+      `[Files] fetchMessages done in ${Date.now() - _t0}ms — total msgs: ${messages.length}`,
+    );
 
     // Determine which messages are unread by merging two sources:
     // 1) The last `unreadCount` messages (from whatsapp-web.js chat state)
@@ -662,7 +664,9 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
     const olderMediaMsgs = mediaMessages.filter(
       (m) => !unreadMsgIds.has(m.id._serialized),
     );
-    console.log(`[Files] media split: ${unreadMediaMsgs.length} unread, ${olderMediaMsgs.length} older`);
+    console.log(
+      `[Files] media split: ${unreadMediaMsgs.length} unread, ${olderMediaMsgs.length} older`,
+    );
 
     // Phase 1: Return unread files immediately (fast — no contact resolution)
     const unreadFiles = unreadMediaMsgs.map(extractFileInfo);
@@ -674,7 +678,9 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
 
     // Pre-compute older file info (synchronous, fast — no contact resolution)
     const allOlderFiles = olderMediaMsgs.map(extractFileInfo);
-    console.log(`[Files] extractFileInfo done in ${Date.now()-_t0}ms — ${allOlderFiles.length} older files queued`);
+    console.log(
+      `[Files] extractFileInfo done in ${Date.now() - _t0}ms — ${allOlderFiles.length} older files queued`,
+    );
 
     // Resolve contact names for ALL files in background (unread + older)
     (async () => {
@@ -698,14 +704,18 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
     // been dispatched — this prevents a race where batches arrive at the
     // renderer before selectChat() has set up the DOM, causing the batches
     // to be silently wiped when selectChat() does fileList.innerHTML = html.
-    console.log(`[Files] returning Phase 1 at ${Date.now()-_t0}ms — ${unreadFiles.length} unread, hasOlderFiles=${olderMediaMsgs.length > 0}`);
+    console.log(
+      `[Files] returning Phase 1 at ${Date.now() - _t0}ms — ${unreadFiles.length} unread, hasOlderFiles=${olderMediaMsgs.length > 0}`,
+    );
     setImmediate(() => {
       const FILE_BATCH_SIZE = 10;
       if (allOlderFiles.length > 0) {
         for (let i = 0; i < allOlderFiles.length; i += FILE_BATCH_SIZE) {
           const batchFiles = allOlderFiles.slice(i, i + FILE_BATCH_SIZE);
           const isDone = i + FILE_BATCH_SIZE >= allOlderFiles.length;
-          console.log(`[Files] sending batch at i=${i}, size=${batchFiles.length}, done=${isDone}`);
+          console.log(
+            `[Files] sending batch at i=${i}, size=${batchFiles.length}, done=${isDone}`,
+          );
           mainWindow?.webContents.send("whatsapp:chat-files-batch", {
             chatId,
             files: batchFiles,
@@ -722,7 +732,11 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
       }
     });
 
-    return { files: unreadFiles, unreadCount, hasOlderFiles: olderMediaMsgs.length > 0 };
+    return {
+      files: unreadFiles,
+      unreadCount,
+      hasOlderFiles: olderMediaMsgs.length > 0,
+    };
   } catch (err) {
     console.error("Error getting chat files:", err);
     return { error: err.message };

@@ -303,7 +303,9 @@ function setupEventListeners() {
   // ── Progressive file loading ──
   // Older files arrive in batches via IPC after unread files were returned.
   window.api.onChatFilesBatch(({ chatId, files, done }) => {
-    console.log(`[onChatFilesBatch] chatId=${chatId} files=${files.length} done=${done} (currentChatId=${currentChatId})`);
+    console.log(
+      `[onChatFilesBatch] chatId=${chatId} files=${files.length} done=${done} (currentChatId=${currentChatId})`,
+    );
     // Ignore batches for a chat we're no longer viewing
     if (chatId !== currentChatId) return;
 
@@ -965,7 +967,9 @@ async function selectChat(chatId, chatName) {
   const _selectT0 = Date.now();
   console.log(`[selectChat] invoking getChatFiles for ${chatId}`);
   const result = await window.api.getChatFiles(chatId, trackedIds);
-  console.log(`[selectChat] getChatFiles resolved in ${Date.now()-_selectT0}ms — unread: ${result.files?.length ?? 0}, hasOlderFiles: ${result.hasOlderFiles}`);
+  console.log(
+    `[selectChat] getChatFiles resolved in ${Date.now() - _selectT0}ms — unread: ${result.files?.length ?? 0}, hasOlderFiles: ${result.hasOlderFiles}`,
+  );
 
   if (result.error) {
     fileList.innerHTML = `<div class="empty-state"><p>Error: ${result.error}</p></div>`;
@@ -1640,8 +1644,14 @@ function switchToLoginScreen() {
   selectedFiles.clear();
   allSelected = false;
   pendingUnreadIds.clear();
-  if (newMessageRefreshTimer) { clearTimeout(newMessageRefreshTimer); newMessageRefreshTimer = null; }
-  if (newMessageFileReloadTimer) { clearTimeout(newMessageFileReloadTimer); newMessageFileReloadTimer = null; }
+  if (newMessageRefreshTimer) {
+    clearTimeout(newMessageRefreshTimer);
+    newMessageRefreshTimer = null;
+  }
+  if (newMessageFileReloadTimer) {
+    clearTimeout(newMessageFileReloadTimer);
+    newMessageFileReloadTimer = null;
+  }
   stopAutoRefresh();
 
   // Clear chat list so old account's chats don't show for the new account
@@ -1862,7 +1872,9 @@ function appendFilesGrouped(files, container, beforeEl) {
   for (const [key, groupFiles] of groups) {
     const label = formatDateLabel(groupFiles[0].timestamp);
     const filesHtml = groupFiles.map(renderFileItem).join("");
-    const existingSep = container.querySelector(`.date-separator[data-date-key="${CSS.escape(key)}"]`);
+    const existingSep = container.querySelector(
+      `.date-separator[data-date-key="${CSS.escape(key)}"]`,
+    );
     if (existingSep) {
       // Find the last file-item that belongs to this separator
       // (every sibling .file-item or .date-separator until the next separator)

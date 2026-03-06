@@ -21,7 +21,9 @@ contextBridge.exposeInMainWorld("api", {
   onChatFilesBatch: (callback) =>
     ipcRenderer.on("whatsapp:chat-files-batch", (_, data) => callback(data)),
   onFileSenderResolved: (callback) =>
-    ipcRenderer.on("whatsapp:file-sender-resolved", (_, data) => callback(data)),
+    ipcRenderer.on("whatsapp:file-sender-resolved", (_, data) =>
+      callback(data),
+    ),
 
   // ── WhatsApp Actions ──
   getUnreadChats: () => ipcRenderer.invoke("get-unread-chats"),
