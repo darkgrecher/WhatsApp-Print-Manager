@@ -159,13 +159,14 @@ function setupEventListeners() {
 
   // WhatsApp QR Code
   window.api.onQRCode((qrDataURL) => {
+    stopInitTimer();
     const qrImg = document.getElementById("qr-image");
     const qrStatus = document.getElementById("qr-status");
     const spinner = document.querySelector(".spinner");
 
     qrImg.src = qrDataURL;
     qrImg.classList.remove("hidden");
-    qrStatus.textContent = "Scan this QR code with WhatsApp on your phone";
+    if (qrStatus) qrStatus.textContent = "Scan this QR code with WhatsApp on your phone";
     if (spinner) spinner.style.display = "none";
   });
 
@@ -175,10 +176,19 @@ function setupEventListeners() {
     const badge = document.getElementById("connection-badge");
 
     switch (status) {
+      case "launching":
+        setQrStatus("Starting browser...");
+        startInitTimer();
+        break;
+      case "qr_ready":
+        stopInitTimer();
+        break;
       case "authenticated":
+        stopInitTimer();
         showLoginLoading();
         break;
       case "ready":
+        stopInitTimer();
         validateLicense();
         break;
       case "disconnected":
@@ -196,6 +206,7 @@ function setupEventListeners() {
         break;
       case "retrying":
         {
+          stopInitTimer();
           const qrImg = document.getElementById("qr-image");
           const qrStatus = document.getElementById("qr-status");
           const spinner = document.querySelector(".spinner");
@@ -203,6 +214,7 @@ function setupEventListeners() {
           if (spinner) spinner.style.display = "";
           if (qrStatus)
             qrStatus.textContent = "Session expired. Reconnecting...";
+          startInitTimer();
         }
         showToast(
           "Session expired, reconnecting with fresh session...",
@@ -216,7 +228,7 @@ function setupEventListeners() {
     }
   });
 
-  // Loading screen
+  // Loading screen (WhatsApp Web loading_screen events — fires after auth)
   window.api.onLoading(({ percent, message }) => {
     const fill = document.getElementById("loading-bar-fill");
     const text = document.getElementById("loading-text");
@@ -1767,10 +1779,10 @@ function switchToLoginScreen() {
   const qrContainer = document.getElementById("qr-container");
   qrContainer.innerHTML = `
     <div class="spinner"></div>
-    <p id="qr-status">Initializing WhatsApp connection...</p>
+    <p id="qr-status">Waiting for browser to start...</p>
     <img id="qr-image" class="qr-image hidden" alt="QR Code" />
   `;
-
+  startInitTimer();
   // Reset loading bar
   const loadingContainer = document.getElementById("loading-bar-container");
   if (loadingContainer) loadingContainer.classList.add("hidden");
@@ -1788,6 +1800,48 @@ function switchToLoginScreen() {
 }
 
 // ── UI Helpers ───────────────────────────────────────────────────────────
+
+// ── Init timer: shows elapsed seconds while waiting for QR code ──────────
+let _initTimerInterval = null;
+let _initTimerStart = 0;
+
+function setQrStatus(text) {
+  const el = document.getElementById("qr-status");
+  if (el) el.textContent = text;
+}
+
+function startInitTimer() {
+  stopInitTimer();
+  _initTimerStart = Date.now();
+  _initTimerInterval = setInterval(() => {
+    const secs = Math.floor((Date.now() - _initTimerStart) / 1000);
+    const el = document.getElementById("qr-status");
+    if (!el) return;
+    // Only update while spinner is showing (QR not yet displayed)
+    const qrImg = document.getElementById("qr-image");
+    if (qrImg && !qrImg.classList.contains("hidden")) {
+      stopInitTimer();
+      return;
+    }
+    // Keep the current base message but append elapsed time
+    const base = el.dataset.base || el.textContent.replace(/ \(\d+s\)$/, "");
+    el.dataset.base = base;
+    el.textContent = `${base} (${secs}s)`;
+  }, 1000);
+}
+
+function stopInitTimer() {
+  if (_initTimerInterval) {
+    clearInterval(_initTimerInterval);
+    _initTimerInterval = null;
+  }
+  // Strip elapsed time suffix from status text
+  const el = document.getElementById("qr-status");
+  if (el && el.dataset.base) {
+    el.textContent = el.dataset.base;
+    delete el.dataset.base;
+  }
+}
 function updateFileStatus(messageId, status) {
   const safeMsgId = messageId.replace(/[^a-zA-Z0-9]/g, "_");
   const el = document.getElementById(`file-${safeMsgId}`);

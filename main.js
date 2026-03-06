@@ -112,10 +112,12 @@ function initWhatsApp(retryAttempt = 1) {
     // makes WhatsApp reject QR-code linking with "Couldn't link device".
     userAgent:
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
-    // Always fetch the latest WhatsApp Web version instead of relying on a
-    // potentially stale local cache.
+    // Cache the WhatsApp Web version locally so repeated starts skip the
+    // remote version-check network round-trip (saves 2-5 seconds on every
+    // launch).  The cache is stored alongside auth data in userData.
     webVersionCache: {
-      type: "none",
+      type: "local",
+      path: getUserDataPath(".wwebjs_cache"),
     },
     puppeteer: {
       headless: true,
@@ -263,6 +265,13 @@ function initWhatsApp(retryAttempt = 1) {
     // of whatsapp-web.js fire message_create instead/additionally
   });
 
+  // ── Granular init progress events ─────────────────────────────────────
+  // Fire status messages as each phase completes so the renderer can show
+  // meaningful progress instead of a static "Initializing..." spinner.
+  whatsappClient.once("qr", () => {
+    mainWindow?.webContents.send("whatsapp:status", "qr_ready");
+  });
+
   // Initialize with error handling, timeout detection, and retry
   const startClient = async (attempt = 1) => {
     // Track whether any meaningful event has fired during init
@@ -325,6 +334,7 @@ function initWhatsApp(retryAttempt = 1) {
       }
     }, INIT_TIMEOUT_MS);
 
+    mainWindow?.webContents.send("whatsapp:status", "launching");
     try {
       await whatsappClient.initialize();
       clearTimeout(initTimer);
