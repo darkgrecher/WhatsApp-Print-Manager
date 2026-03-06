@@ -20,7 +20,8 @@ contextBridge.exposeInMainWorld("api", {
   // ── WhatsApp Actions ──
   getUnreadChats: () => ipcRenderer.invoke("get-unread-chats"),
   getAllChats: (options) => ipcRenderer.invoke("get-all-chats", options),
-  getChatFiles: (chatId) => ipcRenderer.invoke("get-chat-files", chatId),
+  getChatFiles: (chatId, trackedUnreadIds) =>
+    ipcRenderer.invoke("get-chat-files", chatId, trackedUnreadIds),
   downloadFile: (data) => ipcRenderer.invoke("download-file", data),
   downloadAllFiles: (chatId) =>
     ipcRenderer.invoke("download-all-files", chatId),

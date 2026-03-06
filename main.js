@@ -542,7 +542,7 @@ ipcMain.handle("get-all-chats", async (event, { limit = 30 } = {}) => {
 });
 
 // Get messages with media for a specific chat
-ipcMain.handle("get-chat-files", async (event, chatId) => {
+ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
   if (!isClientReady) return { error: "WhatsApp not ready" };
 
   try {
@@ -555,8 +555,10 @@ ipcMain.handle("get-chat-files", async (event, chatId) => {
       chat.fetchMessages({ limit: 50 }),
     );
 
-    // Determine which messages are unread:
-    // The last `unreadCount` messages (sorted by time ascending) are unread
+    // Determine which messages are unread by merging two sources:
+    // 1) The last `unreadCount` messages (from whatsapp-web.js chat state)
+    // 2) Client-tracked message IDs received via real-time onNewMessage events
+    // This ensures all files are tagged even if chat.unreadCount is stale.
     const sortedMsgs = [...messages].sort(
       (a, b) => (a.timestamp || 0) - (b.timestamp || 0),
     );
@@ -564,6 +566,10 @@ ipcMain.handle("get-chat-files", async (event, chatId) => {
     if (unreadCount > 0) {
       const unreadSlice = sortedMsgs.slice(-unreadCount);
       unreadSlice.forEach((m) => unreadMsgIds.add(m.id._serialized));
+    }
+    // Merge client-tracked IDs (handles cases where unreadCount was reset)
+    if (Array.isArray(trackedUnreadIds)) {
+      trackedUnreadIds.forEach((id) => unreadMsgIds.add(id));
     }
 
     const files = [];

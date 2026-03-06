@@ -8,6 +8,9 @@ let selectedFiles = new Set();
 let autoRefreshTimer = null;
 let isRefreshing = false; // guard against re-entrant refresh
 let showAllChats = false; // toggle between "recent/unread" and "all chats"
+let newMessageRefreshTimer = null; // debounce timer for post-notification refresh
+let newMessageFileReloadTimer = null; // debounce timer for file list reload
+const pendingUnreadIds = new Map(); // chatId → Set<messageId> tracked client-side
 const AUTO_REFRESH_INTERVAL = 10000; // 10 seconds
 
 // ── Initialization ───────────────────────────────────────────────────────
@@ -248,19 +251,105 @@ function setupEventListeners() {
   // ── Real-time new message listener ──
   window.api.onNewMessage((data) => {
     console.log("[NewMessage]", data);
-    showToast(
-      `New message from ${data.chatName || data.sender}${data.hasMedia ? " (has file)" : ""}`,
-      "info",
-    );
+    // 'album' is a WhatsApp container event that wraps a group of images —
+    // it is not itself a countable message. Skip it (and any no-content
+    // placeholder) to avoid the badge and tracker showing N+1.
+    const isContainer = data.type === "album" || (!data.hasMedia && !data.body);
 
-    // Auto-refresh the chat list to show the new message
-    refreshChats();
+    if (!isContainer) {
+      showToast(
+        `New message from ${data.chatName || data.sender}${data.hasMedia ? " (has file)" : ""}`,
+        "info",
+      );
+    }
 
-    // If we're currently viewing this chat, reload its files
+    // Track this message's ID so we can tag it as unread later,
+    // regardless of what chat.unreadCount says in whatsapp-web.js.
+    // Only track real messages, not container/album events.
+    if (data.messageId && !isContainer) {
+      if (!pendingUnreadIds.has(data.chatId)) {
+        pendingUnreadIds.set(data.chatId, new Set());
+      }
+      pendingUnreadIds.get(data.chatId).add(data.messageId);
+    }
+
+    // Optimistically update the chat item in the DOM immediately, without
+    // waiting for a getChats() round-trip (which may return stale data).
+    // Pass isContainer so the badge is not bumped for album wrapper events.
+    optimisticChatUpdate(data, isContainer);
+
+    // Debounced follow-up refresh: resets on every new message so only one
+    // refresh fires 2s after the last message in a burst (e.g. 8 files).
+    if (newMessageRefreshTimer) clearTimeout(newMessageRefreshTimer);
+    newMessageRefreshTimer = setTimeout(() => {
+      newMessageRefreshTimer = null;
+      refreshChats();
+    }, 2000);
+
+    // If we're currently viewing this chat, debounce file list reload so
+    // a burst of messages (e.g. 8 images) triggers only one reload after
+    // all messages have arrived and whatsapp-web.js has synced.
     if (currentChatId === data.chatId && data.hasMedia) {
-      selectChat(data.chatId, data.chatName || data.sender);
+      if (newMessageFileReloadTimer) clearTimeout(newMessageFileReloadTimer);
+      newMessageFileReloadTimer = setTimeout(() => {
+        newMessageFileReloadTimer = null;
+        selectChat(data.chatId, data.chatName || data.sender);
+      }, 2000);
     }
   });
+}
+
+// ── Optimistic Chat Update ───────────────────────────────────────────────
+// Immediately updates the chat list DOM when a new message arrives, using
+// the data already present in the IPC payload — no getChats() round-trip.
+function optimisticChatUpdate(data, isContainer = false) {
+  const chatList = document.getElementById("chat-list");
+  if (!chatList) return;
+
+  const existing = chatList.querySelector(
+    `.chat-item[data-chat-id="${CSS.escape(data.chatId)}"]`,
+  );
+
+  if (existing) {
+    // Update last message preview (only for real messages, not containers)
+    if (!isContainer) {
+      const lastMsgEl = existing.querySelector(".chat-last-msg");
+      const preview = data.hasMedia
+        ? `📎 ${data.fileName || data.type || "File"}`
+        : data.body || "";
+      if (lastMsgEl) {
+        lastMsgEl.textContent = preview;
+      } else if (preview) {
+        const chatInfo = existing.querySelector(".chat-info");
+        if (chatInfo) {
+          const div = document.createElement("div");
+          div.className = "chat-last-msg";
+          div.textContent = preview;
+          chatInfo.appendChild(div);
+        }
+      }
+    }
+
+    // Bump the unread badge only for real messages, not container events
+    if (!isContainer) {
+      let badge = existing.querySelector(".badge-unread");
+      if (badge) {
+        const current = parseInt(badge.textContent, 10) || 0;
+        badge.textContent = current + 1;
+      } else {
+        badge = document.createElement("span");
+        badge.className = "badge badge-unread";
+        badge.textContent = "1";
+        existing.appendChild(badge);
+      }
+    }
+
+    // Move this chat to the top of the list
+    chatList.prepend(existing);
+  } else if (!isContainer) {
+    // Chat not currently in the list — do a full refresh to add it
+    refreshChats();
+  }
 }
 
 // ── Screen Switching ─────────────────────────────────────────────────────
@@ -674,9 +763,14 @@ async function refreshChats() {
         ? `<img src="${escapeHtml(chat.profilePicUrl)}" alt="" onerror="this.parentElement.textContent='${initials}'">`
         : initials;
       const isActive = currentChatId === chat.id ? "active" : "";
+      // Use the higher of server unreadCount and client-tracked pending IDs
+      const trackedCount = pendingUnreadIds.has(chat.id)
+        ? pendingUnreadIds.get(chat.id).size
+        : 0;
+      const effectiveUnread = Math.max(chat.unreadCount || 0, trackedCount);
       const unreadBadge =
-        chat.unreadCount > 0
-          ? `<span class="badge badge-unread">${chat.unreadCount}</span>`
+        effectiveUnread > 0
+          ? `<span class="badge badge-unread">${effectiveUnread}</span>`
           : "";
       const lastMsg = chat.lastMessage
         ? `<div class="chat-last-msg">${escapeHtml(chat.lastMessage)}</div>`
@@ -738,7 +832,12 @@ async function selectChat(chatId, chatName) {
     </div>
   `;
 
-  const result = await window.api.getChatFiles(chatId);
+  // Pass client-tracked unread message IDs so the backend can tag them
+  // correctly even if chat.unreadCount is stale or was reset.
+  const trackedIds = pendingUnreadIds.has(chatId)
+    ? [...pendingUnreadIds.get(chatId)]
+    : [];
+  const result = await window.api.getChatFiles(chatId, trackedIds);
 
   if (result.error) {
     fileList.innerHTML = `<div class="empty-state"><p>Error: ${result.error}</p></div>`;
@@ -775,6 +874,9 @@ async function selectChat(chatId, chatName) {
 
   // Mark chat as read AFTER loading files (so unread tagging is accurate)
   window.api.markChatRead(chatId);
+
+  // Clear client-tracked unread IDs now that files have been loaded & displayed
+  pendingUnreadIds.delete(chatId);
 
   // Remove unread badge from sidebar
   const chatItem = document.querySelector(
