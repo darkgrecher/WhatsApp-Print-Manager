@@ -25,7 +25,9 @@ contextBridge.exposeInMainWorld("api", {
       callback(data),
     ),
   onFileAutoDownloaded: (callback) =>
-    ipcRenderer.on("whatsapp:file-auto-downloaded", (_, data) => callback(data)),
+    ipcRenderer.on("whatsapp:file-auto-downloaded", (_, data) =>
+      callback(data),
+    ),
 
   // ── WhatsApp Actions ──
   getUnreadChats: () => ipcRenderer.invoke("get-unread-chats"),

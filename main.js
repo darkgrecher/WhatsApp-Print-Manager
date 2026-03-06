@@ -667,9 +667,13 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         // regardless of type. Filtering to media-only first would cause
         // unread detection to break when most unread messages are text.
         const sortedAll = [...allMsgs].sort((a, b) => (a.t || 0) - (b.t || 0));
-        const unreadIds = unreadCount > 0
-          ? sortedAll.slice(-unreadCount).map((m) => m.id?._serialized).filter(Boolean)
-          : [];
+        const unreadIds =
+          unreadCount > 0
+            ? sortedAll
+                .slice(-unreadCount)
+                .map((m) => m.id?._serialized)
+                .filter(Boolean)
+            : [];
 
         // Only printable types are relevant for a print manager: images and documents.
         const MEDIA_TYPES = ["image", "document"];
@@ -697,7 +701,9 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         // unreadIds from the store are already correctly computed from all msgs
         (storeData.unreadIds || []).forEach((id) => unreadMsgIds.add(id));
       }
-      console.log(`[Files] store read in ${Date.now() - _t0}ms — ${storeMessages.length} media msgs in memory, ${unreadMsgIds.size} unread IDs`);
+      console.log(
+        `[Files] store read in ${Date.now() - _t0}ms — ${storeMessages.length} media msgs in memory, ${unreadMsgIds.size} unread IDs`,
+      );
     } catch (e) {
       console.warn("[Files] Memory store fast path failed:", e.message);
     }
@@ -711,7 +717,8 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
     function extractFromRaw(raw) {
       let { fileName, mimeType, fileSize } = raw;
       if (!fileName) {
-        const ext = mime.extension(mimeType || "application/octet-stream") || "bin";
+        const ext =
+          mime.extension(mimeType || "application/octet-stream") || "bin";
         fileName = `${raw.type || "file"}_${raw.timestamp}.${ext}`;
       }
       const safeId = (raw.id || "").replace(/[^a-zA-Z0-9]/g, "_");
@@ -752,7 +759,8 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         isUnread: unreadMsgIds.has(msg.id._serialized),
       };
       if (!info.fileName) {
-        const ext = mime.extension(info.mimeType || "application/octet-stream") || "bin";
+        const ext =
+          mime.extension(info.mimeType || "application/octet-stream") || "bin";
         info.fileName = `${info.type || "file"}_${msg.timestamp}.${ext}`;
       }
       const expectedPath = path.join(
@@ -775,7 +783,9 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
     // IDs already sent — used to deduplicate against server fetch
     const sentIds = new Set(storeFiles.map((f) => f.messageId));
 
-    console.log(`[Files] split: ${unreadFiles.length} unread, ${olderStoreFiles.length} older in memory`);
+    console.log(
+      `[Files] split: ${unreadFiles.length} unread, ${olderStoreFiles.length} older in memory`,
+    );
 
     // ── Background: send older in-memory files, then fetch from server ────────
     // setImmediate ensures the IPC reply is dispatched first so the renderer
@@ -803,7 +813,9 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
           serverMessages = await retryOnDetachedFrame(() =>
             chat.fetchMessages({ limit: 100 }),
           );
-          console.log(`[Files] fetchMessages done in ${Date.now() - _t0}ms — ${serverMessages.length} server msgs`);
+          console.log(
+            `[Files] fetchMessages done in ${Date.now() - _t0}ms — ${serverMessages.length} server msgs`,
+          );
         } catch (e) {
           console.warn("[Files] fetchMessages failed:", e.message);
         }
@@ -812,7 +824,11 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         // Restrict to printable types only (images and documents).
         const PRINTABLE_TYPES = ["image", "document"];
         const newMediaMsgs = serverMessages
-          .filter((m) => (m.hasMedia || PRINTABLE_TYPES.includes(m.type)) && !sentIds.has(m.id._serialized))
+          .filter(
+            (m) =>
+              (m.hasMedia || PRINTABLE_TYPES.includes(m.type)) &&
+              !sentIds.has(m.id._serialized),
+          )
           .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
         const newFiles = newMediaMsgs.map(extractFileInfo);
@@ -828,7 +844,9 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         } else {
           // Nothing new from server — signal done so loading indicator clears
           mainWindow?.webContents.send("whatsapp:chat-files-batch", {
-            chatId, files: [], done: true,
+            chatId,
+            files: [],
+            done: true,
           });
         }
 
@@ -861,13 +879,22 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
               const media = await msg.downloadMedia();
               if (!media) continue;
               let finalFileName =
-                msg._data?.fileName || msg._data?.filename || media.filename || null;
+                msg._data?.fileName ||
+                msg._data?.filename ||
+                media.filename ||
+                null;
               if (!finalFileName) {
                 const ext = mime.extension(media.mimetype) || "bin";
                 finalFileName = `${msg.type || "file"}_${msg.timestamp}.${ext}`;
               }
-              const safeMsgId = msg.id._serialized.replace(/[^a-zA-Z0-9]/g, "_");
-              const localPath = path.join(DOWNLOADS_DIR, `${safeMsgId}_${finalFileName}`);
+              const safeMsgId = msg.id._serialized.replace(
+                /[^a-zA-Z0-9]/g,
+                "_",
+              );
+              const localPath = path.join(
+                DOWNLOADS_DIR,
+                `${safeMsgId}_${finalFileName}`,
+              );
               if (!fs.existsSync(localPath)) {
                 const buffer = Buffer.from(media.data, "base64");
                 fs.writeFileSync(localPath, buffer);
@@ -879,7 +906,10 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
                 fileName: finalFileName,
               });
             } catch (e) {
-              console.warn(`[Files] Auto-download failed for ${msg.id._serialized}:`, e.message);
+              console.warn(
+                `[Files] Auto-download failed for ${msg.id._serialized}:`,
+                e.message,
+              );
             }
           }
         }
@@ -891,21 +921,28 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         for (const msg of allWWJSMedia) {
           try {
             const contact = await msg.getContact();
-            const name = contact.pushname || contact.name || contact.number || "Unknown";
+            const name =
+              contact.pushname || contact.name || contact.number || "Unknown";
             mainWindow?.webContents.send("whatsapp:file-sender-resolved", {
-              chatId, messageId: msg.id._serialized, sender: name,
+              chatId,
+              messageId: msg.id._serialized,
+              sender: name,
             });
           } catch (e) {}
         }
       } catch (err) {
         console.error("[Files] Background task failed:", err.message);
         mainWindow?.webContents.send("whatsapp:chat-files-batch", {
-          chatId, files: [], done: true,
+          chatId,
+          files: [],
+          done: true,
         });
       }
     });
 
-    console.log(`[Files] returning Phase 1 at ${Date.now() - _t0}ms — ${unreadFiles.length} unread, hasOlderFiles=${storeFiles.length > 0 || true}`);
+    console.log(
+      `[Files] returning Phase 1 at ${Date.now() - _t0}ms — ${unreadFiles.length} unread, hasOlderFiles=${storeFiles.length > 0 || true}`,
+    );
     return {
       files: unreadFiles,
       unreadCount,

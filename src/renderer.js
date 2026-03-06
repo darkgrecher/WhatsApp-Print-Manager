@@ -316,7 +316,7 @@ function setupEventListeners() {
 
       const fileList = document.getElementById("file-list");
       const batchUnread = files.filter((f) => f.isUnread);
-      const batchSeen   = files.filter((f) => !f.isUnread);
+      const batchSeen = files.filter((f) => !f.isUnread);
 
       // ── Unread files arriving via batch ─────────────────────────────────
       // Happens when fetchMessages() surfaces a new message that was not yet
@@ -359,7 +359,7 @@ function setupEventListeners() {
 
       // ── Seen (older) files arriving via batch ────────────────────────────
       if (batchSeen.length > 0) {
-        const seenCount    = currentFiles.filter((f) => !f.isUnread).length;
+        const seenCount = currentFiles.filter((f) => !f.isUnread).length;
         const hasNewSection = fileList.querySelector(".new-section");
         let seenSectionFiles = fileList.querySelector(".seen-section-files");
 
@@ -416,38 +416,40 @@ function setupEventListeners() {
   // ── Auto-downloaded file notification ──
   // Fires when Phase 2 either confirms a file is already on disk (correcting
   // a Phase-1 false-negative) or has just freshly downloaded an unread file.
-  window.api.onFileAutoDownloaded(({ chatId, messageId, localPath, fileName }) => {
-    if (chatId !== currentChatId) return;
+  window.api.onFileAutoDownloaded(
+    ({ chatId, messageId, localPath, fileName }) => {
+      if (chatId !== currentChatId) return;
 
-    // Update in-memory record
-    const file = currentFiles.find((f) => f.messageId === messageId);
-    if (!file) return;
-    file.isDownloaded = true;
-    file.localPath = localPath;
-    if (fileName) file.fileName = fileName;
+      // Update in-memory record
+      const file = currentFiles.find((f) => f.messageId === messageId);
+      if (!file) return;
+      file.isDownloaded = true;
+      file.localPath = localPath;
+      if (fileName) file.fileName = fileName;
 
-    // Update DOM: enable the checkbox
-    const safeMsgId = messageId.replace(/[^a-zA-Z0-9]/g, "_");
-    const fileEl = document.getElementById(`file-${safeMsgId}`);
-    if (fileEl) {
-      const checkbox = fileEl.querySelector(".file-checkbox");
-      if (checkbox) {
-        checkbox.disabled = false;
-        checkbox.removeAttribute("title");
-      }
-    }
-
-    // Auto-select unread files (same behaviour as selectChat's initial render)
-    if (file.isUnread && !selectedFiles.has(messageId)) {
-      selectedFiles.add(messageId);
+      // Update DOM: enable the checkbox
+      const safeMsgId = messageId.replace(/[^a-zA-Z0-9]/g, "_");
+      const fileEl = document.getElementById(`file-${safeMsgId}`);
       if (fileEl) {
-        fileEl.classList.add("selected");
         const checkbox = fileEl.querySelector(".file-checkbox");
-        if (checkbox) checkbox.checked = true;
+        if (checkbox) {
+          checkbox.disabled = false;
+          checkbox.removeAttribute("title");
+        }
       }
-      updatePrintButton();
-    }
-  });
+
+      // Auto-select unread files (same behaviour as selectChat's initial render)
+      if (file.isUnread && !selectedFiles.has(messageId)) {
+        selectedFiles.add(messageId);
+        if (fileEl) {
+          fileEl.classList.add("selected");
+          const checkbox = fileEl.querySelector(".file-checkbox");
+          if (checkbox) checkbox.checked = true;
+        }
+        updatePrintButton();
+      }
+    },
+  );
 
   // ── Sender name resolution for unread files ──
   window.api.onFileSenderResolved(({ chatId, messageId, sender }) => {
@@ -1220,7 +1222,7 @@ function renderFiles() {
   const fileList = document.getElementById("file-list");
 
   const unreadFiles = currentFiles.filter((f) => f.isUnread);
-  const seenFiles   = currentFiles.filter((f) => !f.isUnread);
+  const seenFiles = currentFiles.filter((f) => !f.isUnread);
 
   let html = "";
 
