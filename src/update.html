@@ -12,6 +12,10 @@
             box-sizing: border-box;
         }
 
+        html, body {
+            overflow: hidden;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #ffffff;
@@ -71,6 +75,30 @@
             color: #999;
             margin-top: 10px;
         }
+
+        .cancel-btn {
+            margin-top: 16px;
+            padding: 8px 24px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            background: #fff;
+            color: #666;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            -webkit-app-region: no-drag;
+        }
+
+        .cancel-btn:hover {
+            background: #f3f4f6;
+            border-color: #9ca3af;
+            color: #333;
+        }
+
+        .cancel-btn.hidden {
+            display: none;
+        }
     </style>
 </head>
 
@@ -87,6 +115,7 @@
             <div class="progress-bar-fill" id="progress-bar"></div>
         </div>
         <div class="progress-text" id="progress-text">0%</div>
+        <button class="cancel-btn" id="btn-cancel">Cancel Download</button>
     </div>
 
     <script>
@@ -97,7 +126,11 @@
             const text = document.getElementById('progress-text');
             const pct = Math.round(data.percent || 0);
             bar.style.width = pct + '%';
-            text.textContent = pct + '%';
+
+            // Show MB downloaded / total
+            const dlMB = ((data.transferred || 0) / 1048576).toFixed(1);
+            const totalMB = ((data.total || 0) / 1048576).toFixed(1);
+            text.textContent = pct + '%  (' + dlMB + ' / ' + totalMB + ' MB)';
         });
 
         ipcRenderer.on('update:downloaded', () => {
@@ -105,6 +138,11 @@
             document.getElementById('update-message').textContent = 'Installing update and restarting...';
             document.getElementById('progress-bar').style.width = '100%';
             document.getElementById('progress-text').textContent = '100%';
+            document.getElementById('btn-cancel').classList.add('hidden');
+        });
+
+        document.getElementById('btn-cancel').addEventListener('click', () => {
+            ipcRenderer.send('cancel-update');
         });
 
         ipcRenderer.on('update:error', (_, msg) => {
