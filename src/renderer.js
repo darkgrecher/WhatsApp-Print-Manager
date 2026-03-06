@@ -310,40 +310,89 @@ function setupEventListeners() {
     if (chatId !== currentChatId) return;
 
     if (files.length > 0) {
-      // Add to currentFiles
       currentFiles.push(...files);
       document.getElementById("file-count").textContent =
         `${currentFiles.length} file${currentFiles.length !== 1 ? "s" : ""}`;
 
-      // Append to the "Previously Seen" section in the DOM
       const fileList = document.getElementById("file-list");
-      let seenHeader = fileList.querySelector(".seen-section");
-      const hasUnread = fileList.querySelector(".new-section");
-      if (!seenHeader && hasUnread) {
-        // Create the section header only when there are unread files above
-        const headerHtml = `<div class="file-section-header seen-section">
-          <span class="section-icon">📂</span>
-          <span>Previously Seen (<span class="seen-count">${files.length}</span>)</span>
-        </div>`;
-        const loadingEl = fileList.querySelector(".older-files-loading");
-        if (loadingEl) {
-          loadingEl.insertAdjacentHTML("beforebegin", headerHtml);
+      const batchUnread = files.filter((f) => f.isUnread);
+      const batchSeen   = files.filter((f) => !f.isUnread);
+
+      // ── Unread files arriving via batch ─────────────────────────────────
+      // Happens when fetchMessages() surfaces a new message that was not yet
+      // in the WhatsApp Web memory store during Phase 1.
+      if (batchUnread.length > 0) {
+        // Auto-select downloaded unread files (same behaviour as Phase 1)
+        batchUnread
+          .filter((f) => f.isDownloaded)
+          .forEach((f) => selectedFiles.add(f.messageId));
+        updatePrintButton();
+
+        const totalUnread = currentFiles.filter((f) => f.isUnread).length;
+        let newSectionFiles = fileList.querySelector(".new-section-files");
+
+        if (!newSectionFiles) {
+          // Phase 1 returned nothing unread — build the whole section now
+          const insertBefore =
+            fileList.querySelector(".older-files-loading") ||
+            fileList.querySelector(".seen-section");
+          const sectionHtml =
+            `<div class="file-section-header new-section">` +
+            `<span class="section-icon">🔔</span>` +
+            `<span>New Files (<span class="new-count">${totalUnread}</span>)</span>` +
+            `</div><div class="new-section-files"></div>`;
+          if (insertBefore) {
+            insertBefore.insertAdjacentHTML("beforebegin", sectionHtml);
+          } else {
+            fileList.insertAdjacentHTML("afterbegin", sectionHtml);
+          }
+          newSectionFiles = fileList.querySelector(".new-section-files");
         } else {
-          fileList.insertAdjacentHTML("beforeend", headerHtml);
+          const countEl = fileList.querySelector(".new-section .new-count");
+          if (countEl) countEl.textContent = totalUnread;
         }
-        seenHeader = fileList.querySelector(".seen-section");
-      } else if (seenHeader) {
-        // Update the count in existing header
-        const countEl = seenHeader.querySelector(".seen-count");
-        const seenFiles = currentFiles.filter((f) => !f.isUnread);
-        if (countEl) countEl.textContent = seenFiles.length;
+
+        // Append into the isolated container so date keys stay within this
+        // section and don't accidentally merge into "Previously Seen".
+        appendFilesGrouped(batchUnread, newSectionFiles, null);
       }
 
-      // Render batch files grouped by date, merging into existing date groups
-      const loadingEl = fileList.querySelector(".older-files-loading");
-      appendFilesGrouped(files, fileList, loadingEl);
+      // ── Seen (older) files arriving via batch ────────────────────────────
+      if (batchSeen.length > 0) {
+        const seenCount    = currentFiles.filter((f) => !f.isUnread).length;
+        const hasNewSection = fileList.querySelector(".new-section");
+        let seenSectionFiles = fileList.querySelector(".seen-section-files");
 
-      // Attach event listeners to newly added items
+        if (!seenSectionFiles) {
+          if (hasNewSection) {
+            // Create the "Previously Seen" section with an isolated container
+            const loadingEl = fileList.querySelector(".older-files-loading");
+            const sectionHtml =
+              `<div class="file-section-header seen-section">` +
+              `<span class="section-icon">📂</span>` +
+              `<span>Previously Seen (<span class="seen-count">${seenCount}</span>)</span>` +
+              `</div><div class="seen-section-files"></div>`;
+            if (loadingEl) {
+              loadingEl.insertAdjacentHTML("beforebegin", sectionHtml);
+            } else {
+              fileList.insertAdjacentHTML("beforeend", sectionHtml);
+            }
+            seenSectionFiles = fileList.querySelector(".seen-section-files");
+          } else {
+            // No unread section — flat list, no header needed
+            const loadingEl = fileList.querySelector(".older-files-loading");
+            appendFilesGrouped(batchSeen, fileList, loadingEl);
+          }
+        } else {
+          const countEl = fileList.querySelector(".seen-section .seen-count");
+          if (countEl) countEl.textContent = seenCount;
+        }
+
+        if (seenSectionFiles) {
+          appendFilesGrouped(batchSeen, seenSectionFiles, null);
+        }
+      }
+
       attachFileEventListeners(fileList);
     }
 
@@ -353,8 +402,50 @@ function setupEventListeners() {
       const loadingEl = fileList.querySelector(".older-files-loading");
       if (loadingEl) loadingEl.remove();
 
+      // If nothing loaded at all (no unread, no older), show empty state
+      if (currentFiles.length === 0) {
+        fileList.innerHTML = `<div class="empty-state"><p>No media files found in this chat</p></div>`;
+        document.getElementById("file-count").textContent = "0 files";
+      }
+
       // Load thumbnails for any new PDF files
       loadDocumentThumbnails();
+    }
+  });
+
+  // ── Auto-downloaded file notification ──
+  // Fires when Phase 2 either confirms a file is already on disk (correcting
+  // a Phase-1 false-negative) or has just freshly downloaded an unread file.
+  window.api.onFileAutoDownloaded(({ chatId, messageId, localPath, fileName }) => {
+    if (chatId !== currentChatId) return;
+
+    // Update in-memory record
+    const file = currentFiles.find((f) => f.messageId === messageId);
+    if (!file) return;
+    file.isDownloaded = true;
+    file.localPath = localPath;
+    if (fileName) file.fileName = fileName;
+
+    // Update DOM: enable the checkbox
+    const safeMsgId = messageId.replace(/[^a-zA-Z0-9]/g, "_");
+    const fileEl = document.getElementById(`file-${safeMsgId}`);
+    if (fileEl) {
+      const checkbox = fileEl.querySelector(".file-checkbox");
+      if (checkbox) {
+        checkbox.disabled = false;
+        checkbox.removeAttribute("title");
+      }
+    }
+
+    // Auto-select unread files (same behaviour as selectChat's initial render)
+    if (file.isUnread && !selectedFiles.has(messageId)) {
+      selectedFiles.add(messageId);
+      if (fileEl) {
+        fileEl.classList.add("selected");
+        const checkbox = fileEl.querySelector(".file-checkbox");
+        if (checkbox) checkbox.checked = true;
+      }
+      updatePrintButton();
     }
   });
 
@@ -1007,9 +1098,11 @@ async function selectChat(chatId, chatName) {
   if (unreadFiles.length > 0) {
     html += `<div class="file-section-header new-section">
       <span class="section-icon">🔔</span>
-      <span>New Files (${unreadFiles.length})</span>
+      <span>New Files (<span class="new-count">${unreadFiles.length}</span>)</span>
     </div>`;
-    html += renderFilesGroupedByDate(unreadFiles);
+    // Wrap in an isolated container so batch-appended files don't bleed
+    // date-separator keys from this section into the "Previously Seen" section.
+    html += `<div class="new-section-files">${renderFilesGroupedByDate(unreadFiles)}</div>`;
   }
 
   if (hasOlderFiles) {
@@ -1127,28 +1220,26 @@ function renderFiles() {
   const fileList = document.getElementById("file-list");
 
   const unreadFiles = currentFiles.filter((f) => f.isUnread);
-  const seenFiles = currentFiles.filter((f) => !f.isUnread);
+  const seenFiles   = currentFiles.filter((f) => !f.isUnread);
 
   let html = "";
 
-  // New (unread) files section
   if (unreadFiles.length > 0) {
-    html += `<div class="file-section-header new-section">
-      <span class="section-icon">🔔</span>
-      <span>New Files (${unreadFiles.length})</span>
-    </div>`;
-    html += renderFilesGroupedByDate(unreadFiles);
+    html += `<div class="file-section-header new-section">`;
+    html += `<span class="section-icon">🔔</span>`;
+    html += `<span>New Files (<span class="new-count">${unreadFiles.length}</span>)</span>`;
+    html += `</div>`;
+    html += `<div class="new-section-files">${renderFilesGroupedByDate(unreadFiles)}</div>`;
   }
 
-  // Previously seen files section
   if (seenFiles.length > 0) {
     if (unreadFiles.length > 0) {
-      html += `<div class="file-section-header seen-section">
-        <span class="section-icon">📂</span>
-        <span>Previously Seen (${seenFiles.length})</span>
-      </div>`;
+      html += `<div class="file-section-header seen-section">`;
+      html += `<span class="section-icon">📂</span>`;
+      html += `<span>Previously Seen (<span class="seen-count">${seenFiles.length}</span>)</span>`;
+      html += `</div>`;
     }
-    html += renderFilesGroupedByDate(seenFiles);
+    html += `<div class="seen-section-files">${renderFilesGroupedByDate(seenFiles)}</div>`;
   }
 
   fileList.innerHTML = html;
