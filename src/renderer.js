@@ -166,7 +166,8 @@ function setupEventListeners() {
 
     qrImg.src = qrDataURL;
     qrImg.classList.remove("hidden");
-    if (qrStatus) qrStatus.textContent = "Scan this QR code with WhatsApp on your phone";
+    if (qrStatus)
+      qrStatus.textContent = "Scan this QR code with WhatsApp on your phone";
     if (spinner) spinner.style.display = "none";
   });
 
