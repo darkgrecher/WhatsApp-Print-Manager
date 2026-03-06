@@ -1266,7 +1266,9 @@ function createUpdateWindow() {
 }
 
 autoUpdater.on("download-progress", (progress) => {
-  console.log(`[Updater] Progress: ${Math.round(progress.percent)}% (${(progress.transferred / 1048576).toFixed(1)}/${(progress.total / 1048576).toFixed(1)} MB)`);
+  console.log(
+    `[Updater] Progress: ${Math.round(progress.percent)}% (${(progress.transferred / 1048576).toFixed(1)}/${(progress.total / 1048576).toFixed(1)} MB)`,
+  );
   if (updateWindow && !updateWindow.isDestroyed()) {
     updateWindow.webContents.send("update:download-progress", progress);
   }
@@ -1319,7 +1321,10 @@ ipcMain.handle("check-for-updates", async () => {
     updateWindow.webContents.once("did-finish-load", () => {
       console.log("[Updater] Window loaded, starting download...");
       autoUpdater.downloadUpdate().catch((err) => {
-        console.error("[Updater] downloadUpdate() rejected:", err?.message || err);
+        console.error(
+          "[Updater] downloadUpdate() rejected:",
+          err?.message || err,
+        );
       });
     });
     return { available: true, current, latest };
