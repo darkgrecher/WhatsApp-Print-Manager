@@ -49,14 +49,23 @@ function findSystemBrowser() {
     // Google Chrome (32-bit install on 64-bit Windows)
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
     // Google Chrome (per-user install)
-    path.join(os.homedir(), "AppData", "Local", "Google", "Chrome", "Application", "chrome.exe"),
+    path.join(
+      os.homedir(),
+      "AppData",
+      "Local",
+      "Google",
+      "Chrome",
+      "Application",
+      "chrome.exe",
+    ),
     // Microsoft Edge — pre-installed on every Windows 10/11 machine
     "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
     "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
   ];
   const found = candidates.find((p) => fs.existsSync(p)) || null;
   if (found) console.log(`[WhatsApp] Using system browser: ${found}`);
-  else console.log("[WhatsApp] No system browser found, using bundled Chromium");
+  else
+    console.log("[WhatsApp] No system browser found, using bundled Chromium");
   return found;
 }
 
