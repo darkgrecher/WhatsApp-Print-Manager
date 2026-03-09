@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const crypto = require("crypto");
 const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 const QRCode = require("qrcode");
@@ -32,6 +33,31 @@ function ensureDownloadsDir() {
   if (!fs.existsSync(DOWNLOADS_DIR)) {
     fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
   }
+}
+
+/**
+ * Find an installed Chrome or Edge executable on this machine.
+ * Puppeteer's bundled Chromium frequently crashes on fresh Windows installs
+ * because it lacks system VC++ runtimes and can be quarantined by antivirus.
+ * Chrome and Edge are pre-installed or easily available and are always stable.
+ * Returns null if none found, in which case the bundled Chromium is used.
+ */
+function findSystemBrowser() {
+  const candidates = [
+    // Google Chrome (64-bit install)
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    // Google Chrome (32-bit install on 64-bit Windows)
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    // Google Chrome (per-user install)
+    path.join(os.homedir(), "AppData", "Local", "Google", "Chrome", "Application", "chrome.exe"),
+    // Microsoft Edge — pre-installed on every Windows 10/11 machine
+    "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+  ];
+  const found = candidates.find((p) => fs.existsSync(p)) || null;
+  if (found) console.log(`[WhatsApp] Using system browser: ${found}`);
+  else console.log("[WhatsApp] No system browser found, using bundled Chromium");
+  return found;
 }
 
 // ── Cleanup helpers ──────────────────────────────────────────────────────────
@@ -103,6 +129,7 @@ function createWindow() {
 
 // ── WhatsApp Client ──────────────────────────────────────────────────────────
 function initWhatsApp(retryAttempt = 1) {
+  const systemBrowser = findSystemBrowser();
   whatsappClient = new Client({
     authStrategy: new LocalAuth({
       dataPath: getUserDataPath(".wwebjs_auth"),
@@ -121,6 +148,12 @@ function initWhatsApp(retryAttempt = 1) {
     },
     puppeteer: {
       headless: true,
+      // Use installed Chrome/Edge when available — much more stable than the
+      // bundled Chromium on fresh Windows machines (VC++ runtimes, antivirus).
+      ...(systemBrowser ? { executablePath: systemBrowser } : {}),
+      // Reduce the per-command DevTools Protocol timeout so genuine Chrome
+      // crashes surface in ~15 s instead of the 180 s puppeteer v24 default.
+      protocolTimeout: 15000,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -128,12 +161,9 @@ function initWhatsApp(retryAttempt = 1) {
         "--disable-accelerated-2d-canvas",
         "--no-first-run",
         "--disable-gpu",
-        // Prevent the zygote process launcher from crashing on fresh Windows
-        // installs where the sandbox environment is restricted.
-        "--no-zygote",
-        // Avoid the Viz display compositor which can crash on machines without
-        // proper GPU drivers or VC++ runtimes.
-        "--disable-features=VizDisplayCompositor",
+        // NOTE: do NOT pass --no-zygote when using the installed Windows
+        // Chrome binary.  That flag is designed for Linux; on Windows Chrome
+        // it prevents renderer processes from spawning, so no page ever loads.
         // Suppress first-run welcome UI and background app mode prompts.
         "--disable-extensions",
         "--disable-default-apps",
@@ -296,16 +326,23 @@ function initWhatsApp(retryAttempt = 1) {
         await whatsappClient.destroy();
       } catch (_) {}
 
-      // Give the browser process time to fully exit
-      await new Promise((r) => setTimeout(r, 2000));
+      // Give the browser process a moment to fully exit before re-launching.
+      await new Promise((r) => setTimeout(r, 1500));
 
       if (attempt < 3) {
-        // Clear stale auth data so a fresh QR code can be generated
+        // Clear stale auth data and version cache so a fresh QR code can be
+        // generated.  The version cache can also cause silent hangs if the
+        // cached WhatsApp Web version is incompatible.
         if (!eventReceived) {
           const authPath = getUserDataPath(".wwebjs_auth");
           try {
             fs.rmSync(authPath, { recursive: true, force: true });
             console.log("[WhatsApp] Cleared stale auth data");
+          } catch (_) {}
+          const cachePath = getUserDataPath(".wwebjs_cache");
+          try {
+            fs.rmSync(cachePath, { recursive: true, force: true });
+            console.log("[WhatsApp] Cleared version cache");
           } catch (_) {}
         }
 
@@ -322,9 +359,9 @@ function initWhatsApp(retryAttempt = 1) {
       }
     };
 
-    // Set an initialization timeout – if no events fire within 45 seconds,
+    // Set an initialization timeout – if no events fire within 30 seconds,
     // the session data is likely stale and causing a silent hang.
-    const INIT_TIMEOUT_MS = 45000;
+    const INIT_TIMEOUT_MS = 30000;
     const initTimer = setTimeout(async () => {
       if (!eventReceived) {
         console.warn(
