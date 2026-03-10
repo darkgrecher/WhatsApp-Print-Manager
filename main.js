@@ -1190,11 +1190,14 @@ ipcMain.handle(
 
             printWin.webContents.once("did-finish-load", () => {
               // silent: false opens the native OS print dialog
-              printWin.webContents.print({ silent: false }, (success, errorType) => {
-                printWin.close();
-                if (success) resolve();
-                else reject(new Error(errorType || "Print cancelled"));
-              });
+              printWin.webContents.print(
+                { silent: false },
+                (success, errorType) => {
+                  printWin.close();
+                  if (success) resolve();
+                  else reject(new Error(errorType || "Print cancelled"));
+                },
+              );
             });
 
             printWin.webContents.once("did-fail-load", (_ev, code, desc) => {
@@ -1202,13 +1205,24 @@ ipcMain.handle(
               reject(new Error(desc || `Load failed (${code})`));
             });
           });
-          results.push({ filePath, success: true, method: "system-print-dialog" });
+          results.push({
+            filePath,
+            success: true,
+            method: "system-print-dialog",
+          });
         } catch (err) {
           // "Print cancelled" is not a real error — the user closed the dialog
           if (err.message === "Print cancelled") {
-            results.push({ filePath, success: true, method: "system-print-dialog" });
+            results.push({
+              filePath,
+              success: true,
+              method: "system-print-dialog",
+            });
           } else {
-            console.error(`[Print] Error opening system print dialog for ${filePath}:`, err);
+            console.error(
+              `[Print] Error opening system print dialog for ${filePath}:`,
+              err,
+            );
             results.push({ filePath, error: err.message });
           }
         }
