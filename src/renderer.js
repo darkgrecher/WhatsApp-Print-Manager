@@ -1511,7 +1511,12 @@ async function printSelected() {
 
   const printerName = document.getElementById("printer-select").value;
 
-  showToast(`Opening printer setup for ${filePaths.length} file(s)...`, "info");
+  showToast(
+    printerName
+      ? `Opening printer setup for ${filePaths.length} file(s)...`
+      : `Opening print dialog for ${filePaths.length} file(s)...`,
+    "info",
+  );
 
   const result = await window.api.printWithSetup({ filePaths, printerName });
 
@@ -1532,7 +1537,10 @@ async function printSelected() {
 
 async function printSingleFile(filePath) {
   const printerName = document.getElementById("printer-select").value;
-  showToast("Opening printer setup...", "info");
+  showToast(
+    printerName ? "Opening printer setup..." : "Opening print dialog...",
+    "info",
+  );
 
   const result = await window.api.printWithSetup({
     filePaths: [filePath],

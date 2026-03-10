@@ -1167,38 +1167,64 @@ ipcMain.handle(
     const { exec, execFile } = require("child_process");
     const results = [];
 
-    // Resolve the actual printer name (if empty, find Windows default)
-    let targetPrinter = printerName;
-    if (!targetPrinter) {
-      try {
-        targetPrinter = await new Promise((resolve, reject) => {
-          exec(
-            'powershell -Command "(Get-CimInstance Win32_Printer | Where-Object Default -eq $true).Name"',
-            (err, stdout) => {
-              if (err) reject(err);
-              else resolve(stdout.trim());
-            },
-          );
-        });
-      } catch (e) {
-        console.error("Could not detect default printer:", e);
-        return {
-          error: "No printer selected and could not detect default printer",
-        };
+    // If no printer is selected, open Electron's system print dialog (Ctrl+Shift+P equivalent)
+    if (!printerName) {
+      const { pathToFileURL } = require("url");
+      for (const filePath of filePaths) {
+        try {
+          if (!fs.existsSync(filePath)) {
+            results.push({ filePath, error: "File not found" });
+            continue;
+          }
+          await new Promise((resolve, reject) => {
+            const printWin = new BrowserWindow({
+              show: false,
+              webPreferences: {
+                contextIsolation: true,
+                nodeIntegration: false,
+              },
+            });
+
+            const fileUrl = pathToFileURL(filePath).href;
+            printWin.loadURL(fileUrl);
+
+            printWin.webContents.once("did-finish-load", () => {
+              // silent: false opens the native OS print dialog
+              printWin.webContents.print({ silent: false }, (success, errorType) => {
+                printWin.close();
+                if (success) resolve();
+                else reject(new Error(errorType || "Print cancelled"));
+              });
+            });
+
+            printWin.webContents.once("did-fail-load", (_ev, code, desc) => {
+              printWin.close();
+              reject(new Error(desc || `Load failed (${code})`));
+            });
+          });
+          results.push({ filePath, success: true, method: "system-print-dialog" });
+        } catch (err) {
+          // "Print cancelled" is not a real error — the user closed the dialog
+          if (err.message === "Print cancelled") {
+            results.push({ filePath, success: true, method: "system-print-dialog" });
+          } else {
+            console.error(`[Print] Error opening system print dialog for ${filePath}:`, err);
+            results.push({ filePath, error: err.message });
+          }
+        }
       }
+      return { results };
     }
 
-    if (!targetPrinter) {
-      return { error: "No printer available" };
-    }
+    const targetPrinter = printerName;
 
     // Step 1: Open the printer driver's Printing Preferences dialog
     // This lets the user set color/BW, quality, paper size, orientation, pages per sheet, etc.
     try {
       console.log(`[Print] Opening preferences for printer: ${targetPrinter}`);
-      await new Promise((resolve, reject) => {
+      await new Promise((resolve) => {
         // printui /e opens "Printing Preferences" for the named printer
-        const cmd = `printui /e /n "${targetPrinter.replace(/"/g, '\\"')}"  `;
+        const cmd = `printui /e /n "${targetPrinter.replace(/"/g, '\\"')}"`;
         exec(cmd, (error) => {
           // printui exits when the user closes the dialog (OK or Cancel)
           if (error) {
