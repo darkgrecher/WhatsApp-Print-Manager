@@ -1170,6 +1170,16 @@ ipcMain.handle(
     // If no printer is selected, open Electron's system print dialog (Ctrl+Shift+P equivalent)
     if (!printerName) {
       const { pathToFileURL } = require("url");
+      const imageExts = [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".bmp",
+        ".gif",
+        ".tiff",
+        ".tif",
+        ".webp",
+      ];
       for (const filePath of filePaths) {
         try {
           if (!fs.existsSync(filePath)) {
@@ -1177,31 +1187,79 @@ ipcMain.handle(
             continue;
           }
           await new Promise((resolve, reject) => {
+            const ext = path.extname(filePath).toLowerCase();
+            const fileUrl = pathToFileURL(filePath).href;
+            const isImage = imageExts.includes(ext);
+
             const printWin = new BrowserWindow({
               show: false,
+              width: 800,
+              height: 1100,
               webPreferences: {
                 contextIsolation: true,
                 nodeIntegration: false,
               },
             });
 
-            const fileUrl = pathToFileURL(filePath).href;
-            printWin.loadURL(fileUrl);
+            let tempHtmlPath = null;
+            const cleanup = () => {
+              if (tempHtmlPath) {
+                try {
+                  fs.unlinkSync(tempHtmlPath);
+                } catch {}
+                tempHtmlPath = null;
+              }
+            };
 
-            printWin.webContents.once("did-finish-load", () => {
-              // silent: false opens the native OS print dialog
-              printWin.webContents.print(
-                { silent: false },
-                (success, errorType) => {
-                  printWin.close();
-                  if (success) resolve();
-                  else reject(new Error(errorType || "Print cancelled"));
-                },
+            const doPrint = () => {
+              // Delay lets the renderer finish painting before print is triggered,
+              // preventing blank pages on hidden windows.
+              setTimeout(() => {
+                printWin.webContents.print(
+                  { silent: false },
+                  (success, errorType) => {
+                    printWin.close();
+                    cleanup();
+                    if (success) resolve();
+                    else reject(new Error(errorType || "Print cancelled"));
+                  },
+                );
+              }, 500);
+            };
+
+            if (isImage) {
+              // Wrap image in a full HTML page so the renderer has proper content
+              // to paint. Loading a raw file:// image URL can produce a blank print
+              // because the browser's image-viewer wrapper is not fully rendered in
+              // a hidden window before print() is called.
+              const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; background: white; }
+img { max-width: 100%; height: auto; display: block; }
+@media print { img { max-width: 100%; page-break-inside: avoid; } }
+</style>
+</head>
+<body><img src="${fileUrl}"></body>
+</html>`;
+              tempHtmlPath = path.join(
+                os.tmpdir(),
+                `wpm-print-${Date.now()}.html`,
               );
-            });
+              fs.writeFileSync(tempHtmlPath, htmlContent, "utf8");
+              printWin.loadFile(tempHtmlPath);
+            } else {
+              printWin.loadURL(fileUrl);
+            }
+
+            printWin.webContents.once("did-finish-load", doPrint);
 
             printWin.webContents.once("did-fail-load", (_ev, code, desc) => {
               printWin.close();
+              cleanup();
               reject(new Error(desc || `Load failed (${code})`));
             });
           });
