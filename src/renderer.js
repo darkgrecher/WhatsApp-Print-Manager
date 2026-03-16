@@ -1387,9 +1387,16 @@ async function openSelected() {
   }
 
   const filePaths = [];
+  let allImages = true;
+
   selectedFiles.forEach((msgId) => {
     const file = currentFiles.find((f) => f.messageId === msgId);
-    if (file && file.localPath) filePaths.push(file.localPath);
+    if (file && file.localPath) {
+      filePaths.push(file.localPath);
+      if (getFileType(file.fileName) !== "image") {
+        allImages = false;
+      }
+    }
   });
 
   if (filePaths.length === 0) {
@@ -1397,8 +1404,14 @@ async function openSelected() {
     return;
   }
 
-  for (const filePath of filePaths) {
-    openFile(filePath);
+  if (allImages) {
+    // Send directly to Windows Print Pictures dialog
+    window.api.openPrintPictures(filePaths);
+  } else {
+    // Standard open for non-image or mixed batches
+    for (const filePath of filePaths) {
+      openFile(filePath);
+    }
   }
 
   selectedFiles.clear();

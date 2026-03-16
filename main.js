@@ -1405,6 +1405,57 @@ ipcMain.handle("open-file", async (event, filePath) => {
   return { error: "File not found" };
 });
 
+
+// Open multiple images in the Windows "Print Pictures" dialog
+ipcMain.handle("open-print-pictures", async (event, filePaths) => {
+  try {
+    if (process.platform !== "win32") {
+      for (const fp of filePaths) require('electron').shell.openPath(fp);
+      return { success: true };
+    }
+    const os = require("os");
+    const path = require("path");
+    const { exec } = require("child_process");
+    const batchId = Date.now().toString();
+    const tempDir = path.join(os.tmpdir(), "WhatsappPrintManager_Batch_" + batchId);
+    const fsSync = require("fs");
+    fsSync.mkdirSync(tempDir, { recursive: true });
+
+    for (const fp of filePaths) {
+      if (fsSync.existsSync(fp)) {
+        const dest = path.join(tempDir, path.basename(fp));
+        fsSync.copyFileSync(fp, dest);
+      }
+    }
+
+    const psScriptPath = path.join(tempDir, "print.ps1");
+    // Write ps1 script with a while loop keeping the process alive while "Print Pictures" is open
+    const psScriptContent = `$shell = New-Object -ComObject Shell.Application
+$folder = $shell.Namespace('${tempDir}')
+if ($folder) {
+    $items = $folder.Items()
+    if ($items.Count -gt 0) {
+        $items.InvokeVerbEx('Print')
+        Start-Sleep -Seconds 2
+        while (Get-Process | Where-Object { $_.MainWindowTitle -match 'Print Pictures' }) {
+            Start-Sleep -Seconds 2
+        }
+    }
+}`;
+    fsSync.writeFileSync(psScriptPath, psScriptContent, "utf8");
+
+    // Execute script invisibly, won't block electron UI
+    exec(`powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File "${psScriptPath}"`, (err) => {
+      if (err) console.error("Print Pictures background loop error:", err);
+    });
+
+    return { success: true };
+  } catch (err) {
+    console.error("open-print-pictures error:", err);
+    return { error: err.message };
+  }
+});
+
 // Delete downloaded files + optionally delete from WhatsApp chat
 ipcMain.handle(
   "delete-files",
@@ -1430,10 +1481,10 @@ ipcMain.handle(
     if (isClientReady && chatId && messageIds && messageIds.length > 0) {
       try {
         const chat = await retryOnDetachedFrame(() =>
-          whatsappClient.getChatById(chatId),
+          whatsappClient.getChatById(chatId)
         );
         const messages = await retryOnDetachedFrame(() =>
-          chat.fetchMessages({ limit: 100 }),
+          chat.fetchMessages({ limit: 100 })
         );
 
         for (const msgId of messageIds) {
@@ -1450,7 +1501,7 @@ ipcMain.handle(
               });
             }
           } catch (msgErr) {
-            waResults.push({ messageId: msgId, error: msgErr.message });
+             waResults.push({ messageId: msgId, error: msgErr.message });
           }
         }
       } catch (chatErr) {
@@ -1460,8 +1511,9 @@ ipcMain.handle(
     }
 
     return { results, waResults };
-  },
+  }
 );
+
 
 // (Printer selection is now handled by the OS print dialog – see print-with-dialog handler)
 
