@@ -1,8 +1,9 @@
-const fs = require('fs');
-let content = fs.readFileSync('src/renderer.js', 'utf8');
-const startMatch = 'async function openSelected() {';
+const fs = require("fs");
+let content = fs.readFileSync("src/renderer.js", "utf8");
+const startMatch = "async function openSelected() {";
 const startIndex = content.indexOf(startMatch);
-const endMatch = '// ── Download ─────────────────────────────────────────────────────────────';
+const endMatch =
+  "// ── Download ─────────────────────────────────────────────────────────────";
 const endIndex = content.indexOf(endMatch, startIndex);
 
 const oldBlock = content.substring(startIndex, endIndex);
@@ -49,5 +50,5 @@ const correctBlock = `async function openSelected() {
 `;
 
 content = content.replace(oldBlock, correctBlock);
-fs.writeFileSync('src/renderer.js', content, 'utf8');
-console.log('Fixed openSelected() syntax error');
+fs.writeFileSync("src/renderer.js", content, "utf8");
+console.log("Fixed openSelected() syntax error");

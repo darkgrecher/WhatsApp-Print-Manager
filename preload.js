@@ -49,7 +49,10 @@ contextBridge.exposeInMainWorld("api", {
 
   // ── File Actions ──
   openDownloadsFolder: () => ipcRenderer.invoke("open-downloads-folder"),
-  openFile: (filePath) => ipcRenderer.invoke("open-file", filePath),    openPrintPictures: (filePaths) => ipcRenderer.invoke("open-print-pictures", filePaths),  deleteFiles: (data) => ipcRenderer.invoke("delete-files", data),
+  openFile: (filePath) => ipcRenderer.invoke("open-file", filePath),
+  openPrintPictures: (filePaths) =>
+    ipcRenderer.invoke("open-print-pictures", filePaths),
+  deleteFiles: (data) => ipcRenderer.invoke("delete-files", data),
   generateThumbnail: (filePath) =>
     ipcRenderer.invoke("generate-thumbnail", filePath),
 
