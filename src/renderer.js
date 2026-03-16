@@ -1387,13 +1387,16 @@ async function openSelected() {
   }
 
   const filePaths = [];
+  const selectedTypes = new Set();
   let allImages = true;
 
   selectedFiles.forEach((msgId) => {
     const file = currentFiles.find((f) => f.messageId === msgId);
     if (file && file.localPath) {
       filePaths.push(file.localPath);
-      if (getFileType(file.fileName) !== "image") {
+      const fType = getFileType(file.fileName);
+      selectedTypes.add(fType);
+      if (fType !== "image") {
         allImages = false;
       }
     }
@@ -1401,6 +1404,11 @@ async function openSelected() {
 
   if (filePaths.length === 0) {
     showToast("No downloaded files selected to open", "warning");
+    return;
+  }
+
+  if (selectedTypes.size > 1) {
+    showToast("Only files of one type can be opened", "warning");
     return;
   }
 
