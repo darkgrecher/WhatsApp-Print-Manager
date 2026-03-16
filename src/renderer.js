@@ -1310,32 +1310,39 @@ async function loadDocumentThumbnails() {
 // ── File Selection ───────────────────────────────────────────────────────
 function getFileType(fileName) {
   if (!fileName) return "unknown";
-  const ext = fileName.split('.').pop().toLowerCase();
-  const imageExts = ['jpg', 'jpeg', 'png', 'bmp', 'gif', 'tiff', 'tif', 'webp'];
-  if (ext === 'pdf') return 'pdf';
-  if (imageExts.includes(ext)) return 'image';
+  const ext = fileName.split(".").pop().toLowerCase();
+  const imageExts = ["jpg", "jpeg", "png", "bmp", "gif", "tiff", "tif", "webp"];
+  if (ext === "pdf") return "pdf";
+  if (imageExts.includes(ext)) return "image";
   return ext;
 }
 
 function toggleFileSelect(messageId) {
-  const fileToSelect = currentFiles.find(f => f.messageId === messageId);
+  const fileToSelect = currentFiles.find((f) => f.messageId === messageId);
   if (!fileToSelect) return;
 
   if (!selectedFiles.has(messageId)) {
     // We are adding. Check if it matches existing selection types.
     if (selectedFiles.size > 0) {
       const firstSelectedId = Array.from(selectedFiles)[0];
-      const firstFile = currentFiles.find(f => f.messageId === firstSelectedId);
+      const firstFile = currentFiles.find(
+        (f) => f.messageId === firstSelectedId,
+      );
       if (firstFile) {
         const firstType = getFileType(firstFile.fileName);
         const currentType = getFileType(fileToSelect.fileName);
         if (firstType !== currentType) {
-          showToast(`Please select only files of the same type (${firstType.toUpperCase()})`, "warning");
+          showToast(
+            `Please select only files of the same type (${firstType.toUpperCase()})`,
+            "warning",
+          );
           // Revert checkbox if it was toggled
-          const el = document.getElementById(`file-${messageId.replace(/[^a-zA-Z0-9]/g, "_")}`);
+          const el = document.getElementById(
+            `file-${messageId.replace(/[^a-zA-Z0-9]/g, "_")}`,
+          );
           if (el) {
-             const checkbox = el.querySelector(".file-checkbox");
-             if (checkbox) checkbox.checked = false;
+            const checkbox = el.querySelector(".file-checkbox");
+            if (checkbox) checkbox.checked = false;
           }
           return;
         }
@@ -1353,12 +1360,10 @@ function toggleFileSelect(messageId) {
   const el = document.getElementById(
     `file-${messageId.replace(/[^a-zA-Z0-9]/g, "_")}`,
   );
-  if (el) el.classList.toggle("selected", selectedFiles.has(messageId));      
+  if (el) el.classList.toggle("selected", selectedFiles.has(messageId));
 
   updateSelectionUI();
 }
-
-
 
 function updateSelectionUI() {
   // Update floating delete FAB
@@ -1373,7 +1378,6 @@ function updateSelectionUI() {
     }
   }
 }
-
 
 // ── Open Selected ────────────────────────────────────────────────────────
 async function openSelected() {
@@ -1396,7 +1400,7 @@ async function openSelected() {
   for (const filePath of filePaths) {
     openFile(filePath);
   }
-  
+
   selectedFiles.clear();
   renderFiles();
   updateSelectionUI();

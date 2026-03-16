@@ -1,19 +1,24 @@
-const fs = require('fs');
-let code = fs.readFileSync('src/renderer.js', 'utf8');
+const fs = require("fs");
+let code = fs.readFileSync("src/renderer.js", "utf8");
 
 // 1. Remove toggleSelectAll and updateSelectAllButton
-const toggleSelectAllRegex = /function toggleSelectAll\(\) \{[\s\S]*?\}\s*function updateSelectAllButton\(\) \{[\s\S]*?\}/;
-code = code.replace(toggleSelectAllRegex, '');
+const toggleSelectAllRegex =
+  /function toggleSelectAll\(\) \{[\s\S]*?\}\s*function updateSelectAllButton\(\) \{[\s\S]*?\}/;
+code = code.replace(toggleSelectAllRegex, "");
 
 // 2. Remove updateSelectAllButton() from updatePrintButton (or updateSelectionButton now)
-code = code.replace(/updateSelectAllButton\(\);\n/g, '');
+code = code.replace(/updateSelectAllButton\(\);\n/g, "");
 
 // Rename updatePrintButton to updateSelectionUI
-code = code.replace(/function updatePrintButton\(\)/g, 'function updateSelectionUI()');
-code = code.replace(/updatePrintButton\(\)/g, 'updateSelectionUI()');
+code = code.replace(
+  /function updatePrintButton\(\)/g,
+  "function updateSelectionUI()",
+);
+code = code.replace(/updatePrintButton\(\)/g, "updateSelectionUI()");
 
 // 3. Replace toggleFileSelect
-const toggleFileSelectRegex = /function toggleFileSelect\(messageId\) \{[\s\S]*?updateSelectionUI\(\);\n  \}/;
+const toggleFileSelectRegex =
+  /function toggleFileSelect\(messageId\) \{[\s\S]*?updateSelectionUI\(\);\n  \}/;
 
 const newToggleFileSelect = `function getFileType(fileName) {
   if (!fileName) return "unknown";
@@ -69,11 +74,12 @@ if (code.match(toggleFileSelectRegex)) {
   code = code.replace(toggleFileSelectRegex, newToggleFileSelect);
 } else {
   // If rename didn't match correctly with old name, let's try with updatePrintButton
-  const fallbackRegex = /function toggleFileSelect\(messageId\) \{[\s\S]*?updatePrintButton\(\);\n  \}/;
+  const fallbackRegex =
+    /function toggleFileSelect\(messageId\) \{[\s\S]*?updatePrintButton\(\);\n  \}/;
   if (code.match(fallbackRegex)) {
-     code = code.replace(fallbackRegex, newToggleFileSelect);
+    code = code.replace(fallbackRegex, newToggleFileSelect);
   } else {
-     console.log("Could not find toggleFileSelect!");
+    console.log("Could not find toggleFileSelect!");
   }
 }
 
@@ -109,9 +115,17 @@ async function openSelected() {
 `;
 
 // insert openSelectedFunc before Download chapter
-if (code.includes('// ── Download ─────────────────────────────────────────────────────────────')) {
-    code = code.replace('// ── Download ─────────────────────────────────────────────────────────────', openSelectedFunc + '\n// ── Download ─────────────────────────────────────────────────────────────');
+if (
+  code.includes(
+    "// ── Download ─────────────────────────────────────────────────────────────",
+  )
+) {
+  code = code.replace(
+    "// ── Download ─────────────────────────────────────────────────────────────",
+    openSelectedFunc +
+      "\n// ── Download ─────────────────────────────────────────────────────────────",
+  );
 }
 
-fs.writeFileSync('src/renderer.js', code, 'utf8');
-console.log('Patch complete.');
+fs.writeFileSync("src/renderer.js", code, "utf8");
+console.log("Patch complete.");
