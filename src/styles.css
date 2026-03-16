@@ -1006,13 +1006,7 @@ body {
 .btn-file-action.download:hover {
   background: #f0fdf4;
 }
-.btn-file-action.print {
-  border-color: var(--wa-teal);
-  color: var(--wa-teal);
-}
-.btn-file-action.print:hover {
-  background: #f0fdf4;
-}
+
 
 /* ── Printer Select ──────────────────────────────────────────────────────── */
 .printer-select {

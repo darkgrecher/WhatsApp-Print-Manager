@@ -70,13 +70,9 @@ function setupButtonListeners() {
   });
 
   // File action buttons
-  const btnSelectAll = document.getElementById("btn-select-all");
-  if (btnSelectAll)
-    btnSelectAll.addEventListener("click", () => toggleSelectAll());
-
-  const btnPrintSelected = document.getElementById("btn-print-selected");
-  if (btnPrintSelected)
-    btnPrintSelected.addEventListener("click", () => printSelected());
+  const btnOpenSelected = document.getElementById("btn-open-selected");
+  if (btnOpenSelected)
+    btnOpenSelected.addEventListener("click", () => openSelected());
 
   const fabDelete = document.getElementById("fab-delete");
   if (fabDelete) fabDelete.addEventListener("click", () => deleteSelected());
@@ -339,7 +335,7 @@ function setupEventListeners() {
         batchUnread
           .filter((f) => f.isDownloaded)
           .forEach((f) => selectedFiles.add(f.messageId));
-        updatePrintButton();
+        updateSelectionUI();
 
         const totalUnread = currentFiles.filter((f) => f.isUnread).length;
         let newSectionFiles = fileList.querySelector(".new-section-files");
@@ -459,7 +455,7 @@ function setupEventListeners() {
           const checkbox = fileEl.querySelector(".file-checkbox");
           if (checkbox) checkbox.checked = true;
         }
-        updatePrintButton();
+        updateSelectionUI();
       }
     },
   );
@@ -1037,7 +1033,7 @@ async function refreshChats() {
 async function selectChat(chatId, chatName) {
   currentChatId = chatId;
   selectedFiles.clear();
-  updatePrintButton();
+  updateSelectionUI();
 
   // Clear file search
   const fileSearch = document.getElementById("file-search");
@@ -1140,7 +1136,7 @@ async function selectChat(chatId, chatName) {
     );
   }
 
-  updatePrintButton();
+  updateSelectionUI();
   loadDocumentThumbnails();
 
   // Mark chat as read AFTER loading files (so unread tagging is accurate)
@@ -1190,7 +1186,7 @@ function renderFileItem(file) {
         ${
           file.isDownloaded
             ? `<button class="btn-file-action" data-action="open-file" data-path="${escapeHtml(file.localPath)}">Open</button>
-             <button class="btn-file-action print" data-action="print-file" data-path="${escapeHtml(file.localPath)}">🖨️ Print</button>`
+             `
             : `<button class="btn-file-action download" data-action="download-file" data-msg-id="${escapeHtml(file.messageId)}" data-filename="${escapeHtml(file.fileName)}">⬇️ Download</button>`
         }
       </div>
@@ -1273,9 +1269,6 @@ function handleFileAction(e) {
     case "open-file":
       openFile(el.dataset.path);
       break;
-    case "print-file":
-      printSingleFile(el.dataset.path);
-      break;
     case "download-file":
       downloadSingleFile(el.dataset.msgId, el.dataset.filename);
       break;
@@ -1315,7 +1308,41 @@ async function loadDocumentThumbnails() {
 }
 
 // ── File Selection ───────────────────────────────────────────────────────
+function getFileType(fileName) {
+  if (!fileName) return "unknown";
+  const ext = fileName.split('.').pop().toLowerCase();
+  const imageExts = ['jpg', 'jpeg', 'png', 'bmp', 'gif', 'tiff', 'tif', 'webp'];
+  if (ext === 'pdf') return 'pdf';
+  if (imageExts.includes(ext)) return 'image';
+  return ext;
+}
+
 function toggleFileSelect(messageId) {
+  const fileToSelect = currentFiles.find(f => f.messageId === messageId);
+  if (!fileToSelect) return;
+
+  if (!selectedFiles.has(messageId)) {
+    // We are adding. Check if it matches existing selection types.
+    if (selectedFiles.size > 0) {
+      const firstSelectedId = Array.from(selectedFiles)[0];
+      const firstFile = currentFiles.find(f => f.messageId === firstSelectedId);
+      if (firstFile) {
+        const firstType = getFileType(firstFile.fileName);
+        const currentType = getFileType(fileToSelect.fileName);
+        if (firstType !== currentType) {
+          showToast(`Please select only files of the same type (${firstType.toUpperCase()})`, "warning");
+          // Revert checkbox if it was toggled
+          const el = document.getElementById(`file-${messageId.replace(/[^a-zA-Z0-9]/g, "_")}`);
+          if (el) {
+             const checkbox = el.querySelector(".file-checkbox");
+             if (checkbox) checkbox.checked = false;
+          }
+          return;
+        }
+      }
+    }
+  }
+
   if (selectedFiles.has(messageId)) {
     selectedFiles.delete(messageId);
   } else {
@@ -1326,51 +1353,14 @@ function toggleFileSelect(messageId) {
   const el = document.getElementById(
     `file-${messageId.replace(/[^a-zA-Z0-9]/g, "_")}`,
   );
-  if (el) el.classList.toggle("selected", selectedFiles.has(messageId));
+  if (el) el.classList.toggle("selected", selectedFiles.has(messageId));      
 
-  updatePrintButton();
+  updateSelectionUI();
 }
 
-function toggleSelectAll() {
-  const btn = document.getElementById("btn-select-all");
-  const downloadedFiles = currentFiles.filter((f) => f.isDownloaded);
-  const allCurrentlySelected =
-    downloadedFiles.length > 0 &&
-    downloadedFiles.every((f) => selectedFiles.has(f.messageId));
 
-  if (allCurrentlySelected) {
-    // Deselect all
-    selectedFiles.clear();
-  } else {
-    // Select all downloaded files
-    downloadedFiles.forEach((f) => {
-      selectedFiles.add(f.messageId);
-    });
-  }
 
-  renderFiles();
-  updateSelectAllButton();
-  updatePrintButton();
-}
-
-function updateSelectAllButton() {
-  const btn = document.getElementById("btn-select-all");
-  if (!btn) return;
-  const downloadedFiles = currentFiles.filter((f) => f.isDownloaded);
-  const allCurrentlySelected =
-    downloadedFiles.length > 0 &&
-    downloadedFiles.every((f) => selectedFiles.has(f.messageId));
-  btn.textContent = allCurrentlySelected ? "Deselect All" : "Select All";
-}
-
-function updatePrintButton() {
-  const btn = document.getElementById("btn-print-selected");
-  btn.disabled = selectedFiles.size === 0;
-  btn.innerHTML = `
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-    Print Selected (${selectedFiles.size})
-  `;
-
+function updateSelectionUI() {
   // Update floating delete FAB
   const fab = document.getElementById("fab-delete");
   if (fab) {
@@ -1382,8 +1372,34 @@ function updatePrintButton() {
       fab.classList.add("hidden");
     }
   }
+}
 
-  updateSelectAllButton();
+
+// ── Open Selected ────────────────────────────────────────────────────────
+async function openSelected() {
+  if (selectedFiles.size === 0) {
+    showToast("No downloaded files selected", "warning");
+    return;
+  }
+
+  const filePaths = [];
+  selectedFiles.forEach((msgId) => {
+    const file = currentFiles.find((f) => f.messageId === msgId);
+    if (file && file.localPath) filePaths.push(file.localPath);
+  });
+
+  if (filePaths.length === 0) {
+    showToast("No downloaded files selected to open", "warning");
+    return;
+  }
+
+  for (const filePath of filePaths) {
+    openFile(filePath);
+  }
+  
+  selectedFiles.clear();
+  renderFiles();
+  updateSelectionUI();
 }
 
 // ── Download ─────────────────────────────────────────────────────────────
@@ -1465,7 +1481,7 @@ async function deleteSelected() {
       `${currentFiles.length} file${currentFiles.length !== 1 ? "s" : ""}`;
 
     renderFiles();
-    updatePrintButton();
+    updateSelectionUI();
 
     let msg = `Deleted ${successCount} file(s) from disk`;
     if (waSuccess > 0) msg += `, ${waSuccess} from WhatsApp`;
@@ -1492,73 +1508,6 @@ function closeChat() {
   // Show "no chat selected" state
   document.getElementById("files-section").classList.add("hidden");
   document.getElementById("no-chat-selected").classList.remove("hidden");
-}
-
-// ── Printing ─────────────────────────────────────────────────────────────
-async function printSelected() {
-  if (selectedFiles.size === 0) return;
-
-  const filePaths = [];
-  selectedFiles.forEach((msgId) => {
-    const file = currentFiles.find((f) => f.messageId === msgId);
-    if (file && file.localPath) filePaths.push(file.localPath);
-  });
-
-  if (filePaths.length === 0) {
-    showToast("No downloaded files selected for printing", "warning");
-    return;
-  }
-
-  const printerName = document.getElementById("printer-select").value;
-
-  showToast(
-    printerName
-      ? `Opening printer setup for ${filePaths.length} file(s)...`
-      : `Opening print dialog for ${filePaths.length} file(s)...`,
-    "info",
-  );
-
-  const result = await window.api.printWithSetup({ filePaths, printerName });
-
-  if (result.error) {
-    showToast(`Print error: ${result.error}`, "error");
-    return;
-  }
-
-  if (result.results) {
-    const success = result.results.filter((r) => r.success).length;
-    const fail = result.results.filter((r) => r.error).length;
-    showToast(
-      `Printed ${success} file(s)${fail > 0 ? `, ${fail} failed` : ""}`,
-      fail > 0 ? "warning" : "success",
-    );
-  }
-}
-
-async function printSingleFile(filePath) {
-  const printerName = document.getElementById("printer-select").value;
-  showToast(
-    printerName ? "Opening printer setup..." : "Opening print dialog...",
-    "info",
-  );
-
-  const result = await window.api.printWithSetup({
-    filePaths: [filePath],
-    printerName,
-  });
-
-  if (result.error) {
-    showToast(`Print error: ${result.error}`, "error");
-    return;
-  }
-
-  if (result.results && result.results[0]) {
-    if (result.results[0].success) {
-      showToast("File sent to printer!", "success");
-    } else {
-      showToast(`Print error: ${result.results[0].error}`, "error");
-    }
-  }
 }
 
 // ── Printers ─────────────────────────────────────────────────────────────
