@@ -35,7 +35,7 @@ function setupButtonListeners() {
       if (qrStatus) qrStatus.textContent = "Clearing session and restarting...";
       const spinner = document.querySelector(".spinner");
       if (spinner) spinner.style.display = "inline-block";
-      window.api.logoutWhatsApp(); 
+      window.api.logoutWhatsApp();
     });
   }
 
@@ -218,10 +218,12 @@ function setupEventListeners() {
       case "error":
         stopInitTimer();
         const qrStatusError = document.getElementById("qr-status");
-        if (qrStatusError) qrStatusError.textContent = "Connection failed due to a stale session or timeout.";
+        if (qrStatusError)
+          qrStatusError.textContent =
+            "Connection failed due to a stale session or timeout.";
         const spinnerError = document.querySelector(".spinner");
         if (spinnerError) spinnerError.style.display = "none";
-        
+
         document.getElementById("btn-reconnect").classList.remove("hidden");
         document.getElementById("btn-login-again").classList.remove("hidden");
         showToast("Initialization failed.", "error");

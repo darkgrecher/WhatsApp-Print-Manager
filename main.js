@@ -1405,19 +1405,21 @@ ipcMain.handle("open-file", async (event, filePath) => {
   return { error: "File not found" };
 });
 
-
 // Open multiple images in the Windows "Print Pictures" dialog
 ipcMain.handle("open-print-pictures", async (event, filePaths) => {
   try {
     if (process.platform !== "win32") {
-      for (const fp of filePaths) require('electron').shell.openPath(fp);
+      for (const fp of filePaths) require("electron").shell.openPath(fp);
       return { success: true };
     }
     const os = require("os");
     const path = require("path");
     const { exec } = require("child_process");
     const batchId = Date.now().toString();
-    const tempDir = path.join(os.tmpdir(), "WhatsappPrintManager_Batch_" + batchId);
+    const tempDir = path.join(
+      os.tmpdir(),
+      "WhatsappPrintManager_Batch_" + batchId,
+    );
     const fsSync = require("fs");
     fsSync.mkdirSync(tempDir, { recursive: true });
 
@@ -1445,9 +1447,12 @@ if ($folder) {
     fsSync.writeFileSync(psScriptPath, psScriptContent, "utf8");
 
     // Execute script invisibly, won't block electron UI
-    exec(`powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File "${psScriptPath}"`, (err) => {
-      if (err) console.error("Print Pictures background loop error:", err);
-    });
+    exec(
+      `powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File "${psScriptPath}"`,
+      (err) => {
+        if (err) console.error("Print Pictures background loop error:", err);
+      },
+    );
 
     return { success: true };
   } catch (err) {
@@ -1481,10 +1486,10 @@ ipcMain.handle(
     if (isClientReady && chatId && messageIds && messageIds.length > 0) {
       try {
         const chat = await retryOnDetachedFrame(() =>
-          whatsappClient.getChatById(chatId)
+          whatsappClient.getChatById(chatId),
         );
         const messages = await retryOnDetachedFrame(() =>
-          chat.fetchMessages({ limit: 100 })
+          chat.fetchMessages({ limit: 100 }),
         );
 
         for (const msgId of messageIds) {
@@ -1501,7 +1506,7 @@ ipcMain.handle(
               });
             }
           } catch (msgErr) {
-             waResults.push({ messageId: msgId, error: msgErr.message });
+            waResults.push({ messageId: msgId, error: msgErr.message });
           }
         }
       } catch (chatErr) {
@@ -1511,9 +1516,8 @@ ipcMain.handle(
     }
 
     return { results, waResults };
-  }
+  },
 );
-
 
 // (Printer selection is now handled by the OS print dialog – see print-with-dialog handler)
 
