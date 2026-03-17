@@ -29,7 +29,7 @@ function getUserDataPath(...segments) {
 }
 
 function ensureDownloadsDir() {
-  DOWNLOADS_DIR = getUserDataPath("downloads");
+  DOWNLOADS_DIR = app.getPath("downloads");
   if (!fs.existsSync(DOWNLOADS_DIR)) {
     fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
   }

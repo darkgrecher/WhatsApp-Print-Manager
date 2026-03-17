@@ -26,6 +26,19 @@ function setupButtonListeners() {
   const btnReconnect = document.getElementById("btn-reconnect");
   if (btnReconnect) btnReconnect.addEventListener("click", () => reconnect());
 
+  const btnLoginAgain = document.getElementById("btn-login-again");
+  if (btnLoginAgain) {
+    btnLoginAgain.addEventListener("click", () => {
+      btnLoginAgain.classList.add("hidden");
+      if (btnReconnect) btnReconnect.classList.add("hidden");
+      const qrStatus = document.getElementById("qr-status");
+      if (qrStatus) qrStatus.textContent = "Clearing session and restarting...";
+      const spinner = document.querySelector(".spinner");
+      if (spinner) spinner.style.display = "inline-block";
+      window.api.logoutWhatsApp(); 
+    });
+  }
+
   // Topbar buttons
   const btnRefresh = document.getElementById("btn-refresh");
   if (btnRefresh) btnRefresh.addEventListener("click", () => refreshChats());
@@ -200,6 +213,18 @@ function setupEventListeners() {
       case "auth_failure":
         showToast("Authentication failed. Please try again.", "error");
         document.getElementById("btn-reconnect").classList.remove("hidden");
+        document.getElementById("btn-login-again").classList.remove("hidden");
+        break;
+      case "error":
+        stopInitTimer();
+        const qrStatusError = document.getElementById("qr-status");
+        if (qrStatusError) qrStatusError.textContent = "Connection failed due to a stale session or timeout.";
+        const spinnerError = document.querySelector(".spinner");
+        if (spinnerError) spinnerError.style.display = "none";
+        
+        document.getElementById("btn-reconnect").classList.remove("hidden");
+        document.getElementById("btn-login-again").classList.remove("hidden");
+        showToast("Initialization failed.", "error");
         break;
       case "retrying":
         {
