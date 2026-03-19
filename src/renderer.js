@@ -83,6 +83,10 @@ function setupButtonListeners() {
   });
 
   // File action buttons
+  const btnUnselectAll = document.getElementById("btn-unselect-all");
+  if (btnUnselectAll)
+    btnUnselectAll.addEventListener("click", () => unselectAllFiles());
+
   const btnOpenSelected = document.getElementById("btn-open-selected");
   if (btnOpenSelected)
     btnOpenSelected.addEventListener("click", () => openSelected());
@@ -151,7 +155,7 @@ function setupButtonListeners() {
 
   const btnCheckAgainError = document.getElementById("btn-check-again-error");
   if (btnCheckAgainError)
-    btnCheckAgainError.addEventListener("click", () => recheckLicense());
+    btnCheckAgainError.addEventListener("click", () => restartApplication());
 
   const btnLicenseLogout = document.getElementById("btn-license-logout");
   if (btnLicenseLogout)
@@ -765,6 +769,11 @@ async function recheckLicense() {
   // Small delay to show checking state
   await new Promise((r) => setTimeout(r, 500));
   await validateLicense();
+}
+
+async function restartApplication() {
+  showToast("Restarting application...", "info");
+  await window.api.restartApp();
 }
 
 async function licenseLogout() {
@@ -1404,6 +1413,19 @@ function updateSelectionUI() {
       fab.classList.add("hidden");
     }
   }
+
+  // Show unselect button only when files are selected
+  const btnUnselectAll = document.getElementById("btn-unselect-all");
+  if (btnUnselectAll) {
+    btnUnselectAll.classList.toggle("hidden", selectedFiles.size === 0);
+  }
+}
+
+function unselectAllFiles() {
+  if (selectedFiles.size === 0) return;
+  selectedFiles.clear();
+  renderFiles();
+  updateSelectionUI();
 }
 
 // ── Open Selected ────────────────────────────────────────────────────────
@@ -1448,10 +1470,6 @@ async function openSelected() {
       openFile(filePath);
     }
   }
-
-  selectedFiles.clear();
-  renderFiles();
-  updateSelectionUI();
 }
 
 // ── Download ─────────────────────────────────────────────────────────────

@@ -1881,6 +1881,12 @@ ipcMain.handle("get-app-version", () => {
   return app.getVersion();
 });
 
+ipcMain.handle("restart-app", () => {
+  app.relaunch();
+  app.exit(0);
+  return { success: true };
+});
+
 ipcMain.on("cancel-update", () => {
   console.log("[Updater] User cancelled download");
   updateCancelled = true;

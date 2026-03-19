@@ -67,4 +67,7 @@ contextBridge.exposeInMainWorld("api", {
   // ── Updates ──
   checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
   getAppVersion: () => ipcRenderer.invoke("get-app-version"),
+
+  // ── App Lifecycle ──
+  restartApp: () => ipcRenderer.invoke("restart-app"),
 });
