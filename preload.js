@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld("api", {
   getWhatsAppStatus: () => ipcRenderer.invoke("get-whatsapp-status"),
   getProfileInfo: () => ipcRenderer.invoke("get-profile-info"),
   logoutWhatsApp: () => ipcRenderer.invoke("logout-whatsapp"),
+  logoutAndRestart: () => ipcRenderer.invoke("logout-and-restart"),
 
   // ── Print Actions ──
   printWithSetup: (data) => ipcRenderer.invoke("print-with-setup", data),

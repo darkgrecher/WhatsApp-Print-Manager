@@ -1677,6 +1677,47 @@ ipcMain.handle("logout-whatsapp", async () => {
   return { success: true };
 });
 
+// Logout + full app restart (ensures account unlink and clean QR on next launch)
+ipcMain.handle("logout-and-restart", async () => {
+  try {
+    if (whatsappClient) {
+      try {
+        await whatsappClient.logout();
+      } catch (e) {
+        console.error("[LogoutRestart] logout() failed:", e?.message || e);
+      }
+      try {
+        await whatsappClient.destroy();
+      } catch (e) {
+        console.error("[LogoutRestart] destroy() failed:", e?.message || e);
+      }
+    }
+
+    isClientReady = false;
+    enrichedChatCache.clear();
+    enrichmentInProgress = false;
+
+    // Remove persisted auth/version caches to force QR for a new account.
+    const authPath = getUserDataPath(".wwebjs_auth");
+    const cachePath = getUserDataPath(".wwebjs_cache");
+    try {
+      fs.rmSync(authPath, { recursive: true, force: true });
+    } catch (e) {
+      console.error("[LogoutRestart] Failed clearing auth data:", e);
+    }
+    try {
+      fs.rmSync(cachePath, { recursive: true, force: true });
+    } catch (e) {
+      console.error("[LogoutRestart] Failed clearing version cache:", e);
+    }
+  } finally {
+    app.relaunch();
+    app.exit(0);
+  }
+
+  return { success: true };
+});
+
 // ── Thumbnail Generation ─────────────────────────────────────────────────────
 let thumbWindow = null;
 let thumbBusy = false;

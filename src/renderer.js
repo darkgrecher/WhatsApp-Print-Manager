@@ -35,7 +35,7 @@ function setupButtonListeners() {
       if (qrStatus) qrStatus.textContent = "Clearing session and restarting...";
       const spinner = document.querySelector(".spinner");
       if (spinner) spinner.style.display = "inline-block";
-      window.api.logoutWhatsApp();
+      restartApplication();
     });
   }
 
@@ -777,8 +777,8 @@ async function restartApplication() {
 }
 
 async function licenseLogout() {
-  showToast("Logging out...", "info");
-  await window.api.logoutWhatsApp();
+  showToast("Logging out and restarting...", "info");
+  await window.api.logoutAndRestart();
 }
 
 function switchToMainScreen() {
@@ -1746,10 +1746,9 @@ async function logoutWhatsApp() {
   const dropdown = document.getElementById("profile-dropdown");
   dropdown.classList.add("hidden");
 
-  showToast("Logging out...", "info");
+  showToast("Logging out and restarting...", "info");
   stopAutoRefresh();
-
-  await window.api.logoutWhatsApp();
+  await window.api.logoutAndRestart();
 }
 
 async function checkForUpdates() {
