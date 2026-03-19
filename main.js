@@ -1431,19 +1431,19 @@ ipcMain.handle("open-print-pictures", async (event, filePaths) => {
     }
 
     const psScriptPath = path.join(tempDir, "print.ps1");
-    // Write ps1 script with a while loop keeping the process alive while "Print Pictures" is open
-    const psScriptContent = `$shell = New-Object -ComObject Shell.Application
-$folder = $shell.Namespace('${tempDir}')
-if ($folder) {
+    // Keep the COM host alive long enough for the system print dialog to stay stable.
+    // Avoid matching a localized window title ("Print Pictures"), which fails on
+    // non-English Windows and can close the dialog a few seconds after opening.
+    const psScriptContent = `$ErrorActionPreference = 'SilentlyContinue'
+  $shell = New-Object -ComObject Shell.Application
+  $folder = $shell.Namespace('${tempDir}')
+  if ($folder) {
     $items = $folder.Items()
     if ($items.Count -gt 0) {
-        $items.InvokeVerbEx('Print')
-        Start-Sleep -Seconds 2
-        while (Get-Process | Where-Object { $_.MainWindowTitle -match 'Print Pictures' }) {
-            Start-Sleep -Seconds 2
-        }
+      $items.InvokeVerbEx('Print')
+      Start-Sleep -Seconds 300
     }
-}`;
+  }`;
     fsSync.writeFileSync(psScriptPath, psScriptContent, "utf8");
 
     // Execute script invisibly, won't block electron UI
