@@ -16,15 +16,24 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("download:bulk-progress", (_, data) => callback(data)),
   onNewMessage: (callback) =>
     ipcRenderer.on("whatsapp:new-message", (_, data) => callback(data)),
-  onProfilePic: (callback) =>
-    ipcRenderer.on("whatsapp:profile-pic", (_, data) => callback(data)),
-  onChatsUpdated: (callback) =>
-    ipcRenderer.on("whatsapp:chats-updated", () => callback()),
+  onChatEnriched: (callback) =>
+    ipcRenderer.on("whatsapp:chat-enriched", (_, data) => callback(data)),
+  onChatFilesBatch: (callback) =>
+    ipcRenderer.on("whatsapp:chat-files-batch", (_, data) => callback(data)),
+  onFileSenderResolved: (callback) =>
+    ipcRenderer.on("whatsapp:file-sender-resolved", (_, data) =>
+      callback(data),
+    ),
+  onFileAutoDownloaded: (callback) =>
+    ipcRenderer.on("whatsapp:file-auto-downloaded", (_, data) =>
+      callback(data),
+    ),
 
   // ── WhatsApp Actions ──
   getUnreadChats: () => ipcRenderer.invoke("get-unread-chats"),
   getAllChats: (options) => ipcRenderer.invoke("get-all-chats", options),
-  getChatFiles: (chatId) => ipcRenderer.invoke("get-chat-files", chatId),
+  getChatFiles: (chatId, trackedUnreadIds) =>
+    ipcRenderer.invoke("get-chat-files", chatId, trackedUnreadIds),
   downloadFile: (data) => ipcRenderer.invoke("download-file", data),
   downloadAllFiles: (chatId) =>
     ipcRenderer.invoke("download-all-files", chatId),
@@ -34,6 +43,7 @@ contextBridge.exposeInMainWorld("api", {
   getProfileInfo: () => ipcRenderer.invoke("get-profile-info"),
   getProfilePic: (jid) => ipcRenderer.invoke("get-profile-pic", jid),
   logoutWhatsApp: () => ipcRenderer.invoke("logout-whatsapp"),
+  logoutAndRestart: () => ipcRenderer.invoke("logout-and-restart"),
 
   // ── Print Actions ──
   printWithSetup: (data) => ipcRenderer.invoke("print-with-setup", data),
@@ -42,6 +52,8 @@ contextBridge.exposeInMainWorld("api", {
   // ── File Actions ──
   openDownloadsFolder: () => ipcRenderer.invoke("open-downloads-folder"),
   openFile: (filePath) => ipcRenderer.invoke("open-file", filePath),
+  openPrintPictures: (filePaths) =>
+    ipcRenderer.invoke("open-print-pictures", filePaths),
   deleteFiles: (data) => ipcRenderer.invoke("delete-files", data),
   generateThumbnail: (filePath) =>
     ipcRenderer.invoke("generate-thumbnail", filePath),
@@ -57,4 +69,7 @@ contextBridge.exposeInMainWorld("api", {
   // ── Updates ──
   checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
   getAppVersion: () => ipcRenderer.invoke("get-app-version"),
+
+  // ── App Lifecycle ──
+  restartApp: () => ipcRenderer.invoke("restart-app"),
 });

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const crypto = require("crypto");
 const QRCode = require("qrcode");
 const mime = require("mime-types");
@@ -25,31 +26,60 @@ let sock; // Baileys WebSocket
 let isClientReady = false;
 let DOWNLOADS_DIR;
 
+// Cache for enriched chat data (profile pic, resolved name, last message).
+// Survives across refreshChats() calls so the UI doesn't lose enrichment.
+const enrichedChatCache = new Map();
+let enrichmentInProgress = false;
+
 // License server URL (change this to your production backend URL)
 const LICENSE_API_URL = "https://whatsapp-print-admin.vercel.app/api";
 
-// Baileys logger — silent to keep console clean
-const baileysLogger = pino({ level: "silent" });
-
-// In-memory store for chats, contacts, messages
-let store = makeInMemoryStore({ logger: baileysLogger });
-let storeSaveTimer = null;
-
-// Track the current account's JID so we can detect account switches
-let currentAccountJid = null;
-
-// Ensure the re-auth check only runs once per app lifecycle (not on reconnects)
-let hasCheckedReauth = false;
-
-// Debounced chat-update notification — avoids flooding the renderer
-let chatsUpdatedTimer = null;
-function notifyChatsUpdated() {
-  if (chatsUpdatedTimer) clearTimeout(chatsUpdatedTimer);
-  chatsUpdatedTimer = setTimeout(() => {
-    chatsUpdatedTimer = null;
-    mainWindow?.webContents?.send("whatsapp:chats-updated");
-  }, 500);
+function getUserDataPath(...segments) {
+  return path.join(app.getPath("userData"), ...segments);
 }
+
+function ensureDownloadsDir() {
+  DOWNLOADS_DIR = app.getPath("downloads");
+  if (!fs.existsSync(DOWNLOADS_DIR)) {
+    fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
+  }
+}
+
+/**
+ * Find an installed Chrome or Edge executable on this machine.
+ * Puppeteer's bundled Chromium frequently crashes on fresh Windows installs
+ * because it lacks system VC++ runtimes and can be quarantined by antivirus.
+ * Chrome and Edge are pre-installed or easily available and are always stable.
+ * Returns null if none found, in which case the bundled Chromium is used.
+ */
+function findSystemBrowser() {
+  const candidates = [
+    // Google Chrome (64-bit install)
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    // Google Chrome (32-bit install on 64-bit Windows)
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    // Google Chrome (per-user install)
+    path.join(
+      os.homedir(),
+      "AppData",
+      "Local",
+      "Google",
+      "Chrome",
+      "Application",
+      "chrome.exe",
+    ),
+    // Microsoft Edge — pre-installed on every Windows 10/11 machine
+    "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+  ];
+  const found = candidates.find((p) => fs.existsSync(p)) || null;
+  if (found) console.log(`[WhatsApp] Using system browser: ${found}`);
+  else
+    console.log("[WhatsApp] No system browser found, using bundled Chromium");
+  return found;
+}
+
+// ── Cleanup helpers ──────────────────────────────────────────────────────────
 
 /**
  * Path to the persisted store file.
@@ -61,93 +91,28 @@ function getStorePath() {
 /**
  * Path to the marker that records whether a full history sync has completed.
  */
-function getSyncMarkerPath() {
-  return getUserDataPath(".history_synced");
-}
+function cleanupStaleLockFiles() {
+  const authPath = getUserDataPath(".wwebjs_auth");
+  if (!fs.existsSync(authPath)) return;
 
-function isHistorySynced() {
-  return fs.existsSync(getSyncMarkerPath());
-}
-
-function markHistorySynced() {
-  try {
-    fs.writeFileSync(getSyncMarkerPath(), Date.now().toString());
-  } catch (_) {}
-}
-
-function clearSyncMarker() {
-  try {
-    if (fs.existsSync(getSyncMarkerPath())) fs.unlinkSync(getSyncMarkerPath());
-  } catch (_) {}
-}
-
-/**
- * Load the store from disk if available.
- */
-function loadStoreFromDisk() {
-  const storePath = getStorePath();
-  try {
-    if (fs.existsSync(storePath)) {
-      store.readFromFile(storePath);
-      console.log(
-        `[WhatsApp] Store loaded from disk (${getAllStoreChats().length} chats)`,
-      );
-    }
-  } catch (err) {
-    console.error("[WhatsApp] Failed to read store from disk:", err.message);
-  }
-}
-
-/**
- * Start periodic store saving to disk.
- */
-function startStorePersistence() {
-  if (storeSaveTimer) clearInterval(storeSaveTimer);
-  storeSaveTimer = setInterval(() => {
+  const lockNames = ["SingletonLock", "SingletonCookie", "SingletonSocket"];
+  const walk = (dir) => {
     try {
-      store.writeToFile(getStorePath());
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(fullPath);
+        } else if (lockNames.includes(entry.name)) {
+          try {
+            fs.unlinkSync(fullPath);
+            console.log("[Cleanup] Removed stale lock:", fullPath);
+          } catch (_) {}
+        }
+      }
     } catch (_) {}
-  }, 15000); // save every 15 seconds
+  };
+  walk(authPath);
 }
-
-/**
- * Stop periodic store saving.
- */
-function stopStorePersistence() {
-  if (storeSaveTimer) {
-    clearInterval(storeSaveTimer);
-    storeSaveTimer = null;
-  }
-}
-
-/**
- * Reset the in-memory store and delete persisted file.
- */
-function resetStore() {
-  stopStorePersistence();
-  store = makeInMemoryStore({ logger: baileysLogger });
-  currentAccountJid = null;
-  // Delete persisted store file and sync marker
-  try {
-    const storePath = getStorePath();
-    if (fs.existsSync(storePath)) fs.unlinkSync(storePath);
-  } catch (_) {}
-  clearSyncMarker();
-  console.log("[WhatsApp] Store cleared");
-}
-
-function getUserDataPath(...segments) {
-  return path.join(app.getPath("userData"), ...segments);
-}
-
-function ensureDownloadsDir() {
-  DOWNLOADS_DIR = getUserDataPath("downloads");
-  if (!fs.existsSync(DOWNLOADS_DIR)) {
-    fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
-  }
-}
-
-// ── Cleanup helpers ──────────────────────────────────────────────────────────
 
 /**
  * Clear Electron's GPU disk-cache to avoid "Unable to move the cache" errors.
@@ -187,548 +152,264 @@ function createWindow() {
   }
 }
 
-// ── Baileys Helpers ──────────────────────────────────────────────────────────
+// ── WhatsApp Client ──────────────────────────────────────────────────────────
+function initWhatsApp(retryAttempt = 1) {
+  const systemBrowser = findSystemBrowser();
+  whatsappClient = new Client({
+    authStrategy: new LocalAuth({
+      dataPath: getUserDataPath(".wwebjs_auth"),
+    }),
+    // Use a user agent that matches the actual Chromium version bundled with
+    // puppeteer.  A mismatch (e.g. declaring Chrome/101 while running Chrome/145)
+    // makes WhatsApp reject QR-code linking with "Couldn't link device".
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+    // Cache the WhatsApp Web version locally so repeated starts skip the
+    // remote version-check network round-trip (saves 2-5 seconds on every
+    // launch).  The cache is stored alongside auth data in userData.
+    webVersionCache: {
+      type: "local",
+      path: getUserDataPath(".wwebjs_cache"),
+    },
+    puppeteer: {
+      headless: true,
+      // Use installed Chrome/Edge when available — much more stable than the
+      // bundled Chromium on fresh Windows machines (VC++ runtimes, antivirus).
+      ...(systemBrowser ? { executablePath: systemBrowser } : {}),
+      // Reduce the per-command DevTools Protocol timeout so genuine Chrome
+      // crashes surface in ~15 s instead of the 180 s puppeteer v24 default.
+      protocolTimeout: 15000,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--no-first-run",
+        "--disable-gpu",
+        // NOTE: do NOT pass --no-zygote when using the installed Windows
+        // Chrome binary.  That flag is designed for Linux; on Windows Chrome
+        // it prevents renderer processes from spawning, so no page ever loads.
+        // Suppress first-run welcome UI and background app mode prompts.
+        "--disable-extensions",
+        "--disable-default-apps",
+        "--no-default-browser-check",
+        // Give the headless window an explicit size so Chrome doesn't fail
+        // on systems with no display or unusual display configurations.
+        "--window-size=1280,800",
+      ],
+    },
+  });
 
-/** Media message type keys we care about */
-const MEDIA_TYPES = new Set([
-  "imageMessage",
-  "videoMessage",
-  "documentMessage",
-  "audioMessage",
-  "stickerMessage",
-  "pttMessage",
-]);
-
-/**
- * Extract media info from a Baileys WAMessage.
- * Handles wrappers like viewOnce, ephemeral, documentWithCaption.
- */
-function getMediaInfo(msg) {
-  if (!msg?.message) return null;
-
-  let content = msg.message;
-  if (content.ephemeralMessage) content = content.ephemeralMessage.message;
-  if (content.viewOnceMessage) content = content.viewOnceMessage.message;
-  if (content.viewOnceMessageV2) content = content.viewOnceMessageV2.message;
-  if (content.documentWithCaptionMessage)
-    content = content.documentWithCaptionMessage.message;
-
-  if (!content) return null;
-
-  for (const [key, value] of Object.entries(content)) {
-    if (MEDIA_TYPES.has(key) && value) {
-      return {
-        type: key.replace("Message", ""),
-        content: value,
-        mimetype: value.mimetype || null,
-        fileName: value.fileName || value.title || null,
-        fileSize: value.fileLength ? Number(value.fileLength) : null,
-        caption: value.caption || "",
-      };
-    }
-  }
-  return null;
-}
-
-/**
- * Get text body from any message type.
- */
-function getMessageBody(msg) {
-  if (!msg?.message) return "";
-  const type = getContentType(msg.message);
-  if (type === "conversation") return msg.message.conversation || "";
-  if (type === "extendedTextMessage")
-    return msg.message.extendedTextMessage?.text || "";
-  const media = getMediaInfo(msg);
-  if (media?.caption) return media.caption;
-  return "";
-}
-
-/**
- * Serialize a Baileys message key into a string ID.
- */
-function serializeMessageId(key) {
-  return `${key.fromMe ? "true" : "false"}_${key.remoteJid}_${key.id}`;
-}
-
-/**
- * Convert Baileys timestamp (possibly a Long/object) to a unix timestamp.
- */
-function toTimestamp(ts) {
-  if (!ts) return 0;
-  if (typeof ts === "number") return ts;
-  if (typeof ts === "object" && ts.low !== undefined) return ts.low;
-  return Number(ts) || 0;
-}
-
-/**
- * Get the best available timestamp for a chat, falling back to its latest message.
- */
-function getChatTimestamp(chat) {
-  const ts = toTimestamp(chat.conversationTimestamp || chat.timestamp);
-  if (ts > 0) return ts;
-  // Fallback: use the most recent message timestamp
-  const msgs = getStoreMessages(chat.id);
-  if (msgs.length > 0) {
-    return toTimestamp(msgs[msgs.length - 1].messageTimestamp);
-  }
-  return 0;
-}
-
-/**
- * Get all chats from the store, safely handling different store interfaces.
- * Includes LID-format chats (modern WhatsApp uses LID for most conversations).
- */
-function getAllStoreChats() {
-  try {
-    let chats = [];
-    // KeyedDB (Baileys 6.6.0 default)
-    if (typeof store.chats?.all === "function") {
-      chats = store.chats.all();
-    }
-    // Map-like fallback
-    else if (typeof store.chats?.values === "function") {
-      chats = Array.from(store.chats.values());
-    }
-    // Array fallback
-    else if (Array.isArray(store.chats)) {
-      chats = store.chats;
-    }
-
-    // Also include chats that only exist in the messages store (e.g. groups)
-    const chatIds = new Set(chats.map((c) => c.id));
-    for (const jid of Object.keys(store.messages || {})) {
-      if (!chatIds.has(jid)) {
-        chats.push({ id: jid });
-        chatIds.add(jid);
-      }
-    }
-
-    return [...chats]
-      .filter((c) => {
-        if (!c.id) return false;
-        // Skip system/broadcast JIDs
-        if (c.id === "status@broadcast" || c.id === "0@s.whatsapp.net")
-          return false;
-        return true;
-      })
-      .sort((a, b) => getChatTimestamp(b) - getChatTimestamp(a));
-  } catch (err) {
-    console.error("[WhatsApp] getAllStoreChats error:", err.message);
-    return [];
-  }
-}
-
-/**
- * Get messages for a JID from the store, safely handling interfaces.
- */
-function getStoreMessages(jid) {
-  try {
-    const msgs = store.messages[jid];
-    if (!msgs) return [];
-    if (Array.isArray(msgs.array)) return msgs.array;
-    if (Array.isArray(msgs)) return msgs;
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Get a contact from the store.
- */
-function getContact(jid) {
-  if (!store.contacts) return null;
-  return store.contacts[jid] || null;
-}
-
-/**
- * Resolve the best display name for a chat JID.
- * For LID chats, look up the contact notify/name and fall back to pushName from messages.
- * For phone JIDs, use phone number as fallback.
- */
-function resolveChatName(jid) {
-  const chat = store.chats?.get?.(jid);
-  const contact = getContact(jid);
-  const savedName = chat?.name || contact?.name || "";
-  const whatsappName = contact?.notify || "";
-
-  if (savedName) return savedName;
-  if (whatsappName) return whatsappName;
-
-  // For non-LID JIDs, we can extract a phone number
-  if (!isLidUser(jid) && !jid.endsWith("@g.us")) {
-    return jid.split("@")[0].split(":")[0];
-  }
-
-  // For LID JIDs: try to find a pushName from recent messages
-  const msgs = getStoreMessages(jid);
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i].pushName) return msgs[i].pushName;
-  }
-
-  // For groups, return an identifier
-  if (jid.endsWith("@g.us")) return `Group ${jid.split("@")[0]}`;
-
-  return jid.split("@")[0];
-}
-
-/**
- * Extract a phone number from a JID if possible.
- * LID JIDs don't contain a phone number, so returns empty string.
- */
-function extractPhoneNumber(jid) {
-  if (!jid) return "";
-  if (jid.endsWith("@g.us") || isLidUser(jid)) return "";
-  return jid.split("@")[0].split(":")[0];
-}
-
-/**
- * Find a message in the store by serialized messageId within a chat.
- * Serialized format: "fromMe_remoteJid_keyId"
- */
-function findMessageInStore(chatId, messageId) {
-  const msgs = getStoreMessages(chatId);
-  // Extract key.id robustly: skip the first two segments (fromMe, remoteJid)
-  const idx1 = messageId.indexOf("_");
-  const idx2 = idx1 >= 0 ? messageId.indexOf("_", idx1 + 1) : -1;
-  const keyId = idx2 >= 0 ? messageId.substring(idx2 + 1) : messageId;
-  return msgs.find((m) => m.key.id === keyId) || null;
-}
-
-// ── WhatsApp Client (Baileys) ────────────────────────────────────────────────
-async function initWhatsApp() {
-  const authPath = getUserDataPath(".baileys_auth");
-  if (!fs.existsSync(authPath)) {
-    fs.mkdirSync(authPath, { recursive: true });
-  }
-
-  // Load cached store from disk (so chats show immediately on reconnect)
-  loadStoreFromDisk();
-
-  // On the very first init of this app session, check whether the previous
-  // auth session never received a full history sync. If so, force re-auth so
-  // shouldSyncHistoryMessage can run on the fresh connection.
-  // This must NOT run on reconnects (status 515) or we'd wipe the auth mid-scan.
-  if (!hasCheckedReauth) {
-    hasCheckedReauth = true;
-    const credsFile = path.join(authPath, "creds.json");
-    let wasAuthenticated = false;
+  // QR Code event
+  whatsappClient.on("qr", async (qr) => {
+    console.log("[WhatsApp] QR code received");
     try {
-      if (fs.existsSync(credsFile)) {
-        const creds = JSON.parse(fs.readFileSync(credsFile, "utf8"));
-        wasAuthenticated = !!creds.me;
-      }
-    } catch (_) {}
-
-    if (wasAuthenticated && !isHistorySynced()) {
-      console.log(
-        "[WhatsApp] Previously authenticated but history never synced — forcing re-auth",
-      );
-      try {
-        fs.rmSync(authPath, { recursive: true, force: true });
-        fs.mkdirSync(authPath, { recursive: true });
-      } catch (err) {
-        console.error("[WhatsApp] Failed to clear auth:", err.message);
-      }
-      // Also clear the partial store
-      resetStore();
-    }
-  }
-
-  const { state, saveCreds } = await useMultiFileAuthState(authPath);
-
-  let version;
-  try {
-    const result = await fetchLatestBaileysVersion();
-    version = result.version;
-    console.log(`[WhatsApp] Using WA version: ${version.join(".")}`);
-  } catch (err) {
-    console.warn("[WhatsApp] Could not fetch latest version, using default");
-    version = undefined; // Baileys will use its bundled default
-  }
-
-  const socketOptions = {
-    auth: state,
-    printQRInTerminal: false,
-    logger: baileysLogger,
-    markOnlineOnConnect: false,
-    // Request history sync so chats are populated on reconnect
-    shouldSyncHistoryMessage: () => true,
-  };
-  if (version) socketOptions.version = version;
-
-  sock = makeWASocket(socketOptions);
-
-  // Bind the built-in store to capture chats, contacts, messages
-  store.bind(sock.ev);
-
-  // Start persisting store to disk
-  startStorePersistence();
-
-  // Persist credentials
-  sock.ev.on("creds.update", saveCreds);
-
-  // ── Connection updates (QR, auth, ready, disconnect) ──
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    // QR Code — arrives within seconds, no browser needed
-    if (qr) {
-      console.log("[WhatsApp] QR code received");
-      try {
-        const qrDataURL = await QRCode.toDataURL(qr, {
-          width: 280,
-          margin: 2,
-        });
-        mainWindow?.webContents?.send("whatsapp:qr", qrDataURL);
-      } catch (err) {
-        console.error("QR generation error:", err);
-      }
-    }
-
-    if (connection === "connecting") {
-      console.log("[WhatsApp] Connecting...");
-    }
-
-    if (connection === "open") {
-      console.log("[WhatsApp] Connected");
-
-      // Track the current account JID
-      const newJid = sock.user?.id;
-      if (currentAccountJid && newJid && currentAccountJid !== newJid) {
-        // Account switched — wipe the old store data
-        console.log(
-          `[WhatsApp] Account changed (${currentAccountJid} -> ${newJid}), clearing store`,
-        );
-        resetStore();
-        store.bind(sock.ev);
-      }
-      currentAccountJid = newJid;
-
-      mainWindow?.webContents?.send("whatsapp:status", "authenticated");
-
-      // If we have cached chats from disk, go ready quickly
-      const cachedCount = getAllStoreChats().length;
-      if (cachedCount > 0) {
-        console.log(
-          `[WhatsApp] ${cachedCount} cached chats available, going ready immediately`,
-        );
-        mainWindow?.webContents?.send("whatsapp:loading", {
-          percent: 100,
-          message: `Loaded ${cachedCount} chats`,
-        });
-        isClientReady = true;
-        mainWindow?.webContents?.send("whatsapp:status", "ready");
-      } else {
-        mainWindow?.webContents?.send("whatsapp:loading", {
-          percent: 30,
-          message: "Connected. Waiting for chat sync...",
-        });
-        // Wait for chats to arrive from history sync
-        waitForChatsAndReady();
-      }
-    }
-
-    if (connection === "close") {
-      isClientReady = false;
-
-      // Save store to disk before disconnecting
-      try {
-        store.writeToFile(getStorePath());
-      } catch (_) {}
-
-      const statusCode = lastDisconnect?.error?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-
-      console.log(
-        `[WhatsApp] Connection closed. Status: ${statusCode}. Reconnect: ${shouldReconnect}`,
-      );
-
-      if (statusCode === DisconnectReason.loggedOut) {
-        mainWindow?.webContents?.send("whatsapp:status", "logged_out");
-        resetStore(); // clear stale data on logout
-        try {
-          fs.rmSync(authPath, { recursive: true, force: true });
-        } catch (_) {}
-      } else if (shouldReconnect) {
-        mainWindow?.webContents?.send("whatsapp:status", "retrying");
-        setTimeout(() => {
-          initWhatsApp().catch((err) => {
-            console.error("[WhatsApp] Reconnect failed:", err.message);
-            mainWindow?.webContents?.send("whatsapp:status", "error");
-          });
-        }, 3000);
-      } else {
-        mainWindow?.webContents?.send("whatsapp:status", "disconnected");
-      }
+      const qrDataURL = await QRCode.toDataURL(qr, { width: 280, margin: 2 });
+      mainWindow?.webContents.send("whatsapp:qr", qrDataURL);
+    } catch (err) {
+      console.error("QR generation error:", err);
     }
   });
 
-  // ── History sync tracking ──
-  sock.ev.on("messaging-history.set", ({ chats: syncedChats, isLatest }) => {
-    const totalChats = getAllStoreChats().length;
-    console.log(
-      `[WhatsApp] History sync: +${syncedChats?.length || 0} chats (total: ${totalChats}, isLatest: ${isLatest})`,
-    );
-    mainWindow?.webContents?.send("whatsapp:loading", {
-      percent: Math.min(90, 30 + totalChats),
-      message: `Syncing chats... (${totalChats} loaded)`,
-    });
-    // Persist immediately so synced chats survive a crash
-    try {
-      store.writeToFile(getStorePath());
-    } catch (_) {}
-    // Mark sync complete once the final batch arrives
-    if (isLatest) {
-      markHistorySynced();
-      console.log(
-        `[WhatsApp] History sync complete — ${totalChats} chats cached`,
-      );
-    }
-    // Notify renderer so chat list updates as history batches arrive
-    notifyChatsUpdated();
+  // Authenticated
+  whatsappClient.on("authenticated", () => {
+    console.log("[WhatsApp] Authenticated");
+    mainWindow?.webContents.send("whatsapp:status", "authenticated");
   });
 
-  sock.ev.on("chats.upsert", (newChats) => {
-    const total = getAllStoreChats().length;
-    console.log(
-      `[WhatsApp] chats.upsert: +${newChats?.length || 0} (total: ${total})`,
-    );
-    // Persist new chats promptly
-    try {
-      store.writeToFile(getStorePath());
-    } catch (_) {}
-    // Notify renderer that the chat list changed
-    notifyChatsUpdated();
+  // Ready
+  whatsappClient.on("ready", () => {
+    console.log("[WhatsApp] Client is ready");
+    isClientReady = true;
+    mainWindow?.webContents.send("whatsapp:status", "ready");
   });
 
-  // ── Chat metadata updates (unread count, timestamp, name changes) ──
-  sock.ev.on("chats.update", (updates) => {
-    console.log(
-      `[WhatsApp] chats.update: ${updates?.length || 0} chats updated`,
-    );
-    // The in-memory store already applies the updates; notify renderer
-    notifyChatsUpdated();
+  // Loading screen progress
+  whatsappClient.on("loading_screen", (percent, message) => {
+    mainWindow?.webContents.send("whatsapp:loading", { percent, message });
   });
 
-  sock.ev.on("chats.delete", (deletions) => {
-    console.log(
-      `[WhatsApp] chats.delete: ${deletions?.length || 0} chats removed`,
-    );
-    notifyChatsUpdated();
+  // Disconnected
+  whatsappClient.on("disconnected", (reason) => {
+    console.log("[WhatsApp] Disconnected:", reason);
+    isClientReady = false;
+    mainWindow?.webContents.send("whatsapp:status", "disconnected");
   });
 
-  // ── Contact updates (so chat names display correctly) ──
-  sock.ev.on("contacts.upsert", (contacts) => {
-    console.log(`[WhatsApp] contacts.upsert: ${contacts?.length || 0}`);
-    notifyChatsUpdated();
-  });
-
-  sock.ev.on("contacts.update", (updates) => {
-    console.log(`[WhatsApp] contacts.update: ${updates?.length || 0}`);
-    notifyChatsUpdated();
+  // Auth failure
+  whatsappClient.on("auth_failure", (msg) => {
+    console.error("[WhatsApp] Auth failure:", msg);
+    mainWindow?.webContents.send("whatsapp:status", "auth_failure");
   });
 
   // ── Real-time incoming message listener ──
-  sock.ev.on("messages.upsert", async ({ messages: newMessages, type }) => {
-    if (type !== "notify") return;
-
-    for (const msg of newMessages) {
-      // For outgoing messages, just trigger a chat list refresh (chat moves to top)
-      if (msg.key.fromMe) {
-        notifyChatsUpdated();
-        continue;
-      }
-
-      const jid = msg.key.remoteJid;
-      if (!jid || jid === "status@broadcast") continue;
-
-      const isGroup = jid.endsWith("@g.us");
-      const contactNumber = extractPhoneNumber(jid);
-      const contact = getContact(jid);
-      const senderName =
-        msg.pushName ||
-        contact?.notify ||
-        contact?.name ||
-        contactNumber ||
-        jid.split("@")[0];
-
-      const chatName = resolveChatName(jid);
-
-      const chatInfo = store.chats?.get?.(jid);
-      const media = getMediaInfo(msg);
-      const hasMedia = media !== null;
+  whatsappClient.on("message", async (msg) => {
+    console.log(
+      `[WhatsApp] New message from ${msg.from}: type=${msg.type}, hasMedia=${msg.hasMedia}`,
+    );
+    try {
+      const chat = await msg.getChat();
+      const contact = await msg.getContact();
+      const contactName =
+        contact.pushname || contact.name || contact.number || "Unknown";
 
       const messageData = {
-        chatId: jid,
-        chatName,
-        contactNumber,
-        isGroup,
-        unreadCount: chatInfo?.unreadCount || 0,
-        messageId: serializeMessageId(msg.key),
-        hasMedia,
-        type:
-          media?.type ||
-          (msg.message
-            ? (getContentType(msg.message) || "").replace("Message", "")
-            : "unknown"),
-        body: getMessageBody(msg),
-        timestamp: toTimestamp(msg.messageTimestamp),
-        sender: senderName,
+        chatId: chat.id._serialized,
+        chatName: chat.name || contactName,
+        contactNumber: chat.id.user || chat.id._serialized,
+        isGroup: chat.isGroup,
+        unreadCount: chat.unreadCount,
+        messageId: msg.id._serialized,
+        hasMedia: msg.hasMedia,
+        type: msg.type,
+        body: msg.body || "",
+        timestamp: msg.timestamp,
+        sender: contactName,
       };
 
-      // Auto-download media
-      if (hasMedia) {
-        messageData.fileName = media.fileName;
-        messageData.mimeType = media.mimetype;
-        messageData.fileSize = media.fileSize;
+      // If message has media, gather file info and auto-download
+      if (msg.hasMedia) {
+        messageData.fileName = msg._data?.fileName || null;
+        messageData.mimeType = msg._data?.mimetype || null;
+        messageData.fileSize = msg._data?.size || null;
 
         if (!messageData.fileName) {
           const ext =
             mime.extension(
               messageData.mimeType || "application/octet-stream",
             ) || "bin";
-          messageData.fileName = `${media.type || "file"}_${messageData.timestamp}.${ext}`;
+          messageData.fileName = `${msg.type || "file"}_${msg.timestamp}.${ext}`;
         }
 
+        // Auto-download media without marking the chat as read
         try {
-          const buffer = await downloadMediaMessage(
-            msg,
-            "buffer",
-            {},
-            {
-              logger: baileysLogger,
-              reuploadRequest: sock?.updateMediaMessage,
-            },
-          );
-          if (buffer) {
-            const safeMsgId = messageData.messageId.replace(
-              /[^a-zA-Z0-9]/g,
-              "_",
-            );
+          const media = await msg.downloadMedia();
+          if (media) {
+            let finalFileName = messageData.fileName || media.filename;
+            if (!finalFileName) {
+              const ext2 = mime.extension(media.mimetype) || "bin";
+              finalFileName = `file_${Date.now()}.${ext2}`;
+            }
+            const safeMsgId = msg.id._serialized.replace(/[^a-zA-Z0-9]/g, "_");
             const localPath = path.join(
               DOWNLOADS_DIR,
-              `${safeMsgId}_${messageData.fileName}`,
+              `${safeMsgId}_${finalFileName}`,
             );
+            const buffer = Buffer.from(media.data, "base64");
             fs.writeFileSync(localPath, buffer);
             messageData.autoDownloaded = true;
             messageData.localPath = localPath;
-            console.log(
-              `[WhatsApp] Auto-downloaded media: ${messageData.fileName}`,
-            );
+            console.log(`[WhatsApp] Auto-downloaded media: ${finalFileName}`);
           }
         } catch (dlErr) {
           console.error("[WhatsApp] Auto-download failed:", dlErr.message);
         }
       }
 
-      console.log(
-        `[WhatsApp] New message from ${jid}: type=${messageData.type}, hasMedia=${hasMedia}`,
-      );
-      mainWindow?.webContents?.send("whatsapp:new-message", messageData);
+      mainWindow?.webContents.send("whatsapp:new-message", messageData);
+    } catch (err) {
+      console.error("[WhatsApp] Error processing incoming message:", err);
     }
   });
+
+  // Also listen for message_create (messages sent BY this account or received)
+  whatsappClient.on("message_create", async (msg) => {
+    // Only care about incoming messages (not our own)
+    if (msg.fromMe) return;
+    // The "message" event above handles incoming, but some versions
+    // of whatsapp-web.js fire message_create instead/additionally
+  });
+
+  // ── Granular init progress events ─────────────────────────────────────
+  // Fire status messages as each phase completes so the renderer can show
+  // meaningful progress instead of a static "Initializing..." spinner.
+  whatsappClient.once("qr", () => {
+    mainWindow?.webContents.send("whatsapp:status", "qr_ready");
+  });
+
+  // Initialize with error handling, timeout detection, and retry
+  const startClient = async (attempt = 1) => {
+    // Track whether any meaningful event has fired during init
+    let eventReceived = false;
+    // Guard against both timeout and catch block trying to retry
+    let retryTriggered = false;
+    const markEventReceived = () => {
+      eventReceived = true;
+    };
+
+    // Listen for key events that indicate successful progress
+    whatsappClient.once("qr", markEventReceived);
+    whatsappClient.once("authenticated", markEventReceived);
+    whatsappClient.once("ready", markEventReceived);
+    whatsappClient.once("auth_failure", markEventReceived);
+
+    const doRetry = async (reason) => {
+      if (retryTriggered) return; // prevent double-retry
+      retryTriggered = true;
+
+      try {
+        await whatsappClient.destroy();
+      } catch (_) {}
+
+      // Give the browser process a moment to fully exit before re-launching.
+      await new Promise((r) => setTimeout(r, 1500));
+
+      if (attempt < 3) {
+        // Clear stale auth data and version cache so a fresh QR code can be
+        // generated.  The version cache can also cause silent hangs if the
+        // cached WhatsApp Web version is incompatible.
+        if (!eventReceived) {
+          const authPath = getUserDataPath(".wwebjs_auth");
+          try {
+            fs.rmSync(authPath, { recursive: true, force: true });
+            console.log("[WhatsApp] Cleared stale auth data");
+          } catch (_) {}
+          const cachePath = getUserDataPath(".wwebjs_cache");
+          try {
+            fs.rmSync(cachePath, { recursive: true, force: true });
+            console.log("[WhatsApp] Cleared version cache");
+          } catch (_) {}
+        }
+
+        cleanupStaleLockFiles();
+        console.log(`[WhatsApp] Retrying (${reason})...`);
+        mainWindow?.webContents.send("whatsapp:status", "retrying");
+        initWhatsApp(attempt + 1);
+      } else {
+        mainWindow?.webContents.send("whatsapp:status", "error");
+        mainWindow?.webContents.send(
+          "whatsapp:error",
+          "Failed to start WhatsApp after multiple attempts. Please restart the app.",
+        );
+      }
+    };
+
+    // Set an initialization timeout – if no events fire within 30 seconds,
+    // the session data is likely stale and causing a silent hang.
+    const INIT_TIMEOUT_MS = 30000;
+    const initTimer = setTimeout(async () => {
+      if (!eventReceived) {
+        console.warn(
+          `[WhatsApp] No events received after ${INIT_TIMEOUT_MS / 1000}s (attempt ${attempt}) – session may be stale`,
+        );
+        await doRetry("stale session timeout");
+      }
+    }, INIT_TIMEOUT_MS);
+
+    mainWindow?.webContents.send("whatsapp:status", "launching");
+    try {
+      await whatsappClient.initialize();
+      clearTimeout(initTimer);
+    } catch (err) {
+      clearTimeout(initTimer);
+      console.error(
+        `[WhatsApp] Initialization failed (attempt ${attempt}):`,
+        err.message,
+      );
+      await doRetry("init error");
+    }
+  };
+  startClient(retryAttempt);
 }
 
 // ── Utility Helpers ──────────────────────────────────────────────────────────
@@ -810,53 +491,186 @@ ipcMain.handle("get-unread-chats", async () => {
   if (!isClientReady) return { error: "WhatsApp not ready" };
 
   try {
-    const chats = getAllStoreChats();
-    console.log(`[WhatsApp] get-unread-chats: returning ${chats.length} chats`);
-    if (chats.length === 0) return { chats: [] };
+    // ── Phase 1: Fast basic data directly from WhatsApp Web's in-memory store ──
+    // window.Store.Chat.getModelsArray() is synchronous — it reads already-loaded
+    // in-memory data without any serialization overhead, so it completes in
+    // milliseconds regardless of how many chats the account has.
+    // This completely bypasses the slow getChats() serialization path.
+    let basicChats = null;
+    try {
+      basicChats = await whatsappClient.pupPage.evaluate(() => {
+        const models =
+          window.Store?.Chat?.getModelsArray?.() ||
+          window.WWebJS?.store?.Chat?.getModelsArray?.() ||
+          [];
+        return models
+          .filter((c) => c.id?._serialized !== "status@broadcast")
+          .map((c) => ({
+            id: c.id._serialized,
+            name:
+              c.formattedTitle || c.name || c.id.user || c.id._serialized || "",
+            unreadCount: c.unreadCount || 0,
+            isGroup: !!c.isGroup,
+            timestamp: c.t || 0,
+          }))
+          .sort((a, b) => b.timestamp - a.timestamp);
+      });
+    } catch (e) {
+      console.warn("[get-unread-chats] Fast path failed:", e.message);
+    }
 
-    const result = chats.map((chat) => {
-      const jid = chat.id;
-      const isGroup = jid.endsWith("@g.us");
-      const contactNumber = extractPhoneNumber(jid);
-      const displayName = resolveChatName(jid);
-      const contact = getContact(jid);
-      const whatsappName = contact?.notify || "";
+    // Fallback: if the page evaluate didn't work, use the standard API
+    // (slower but guaranteed to work).
+    if (!basicChats || basicChats.length === 0) {
+      console.log("[get-unread-chats] Falling back to getChats()");
+      const chats = await retryOnDetachedFrame(() =>
+        withTimeout(whatsappClient.getChats(), 60000, null),
+      );
+      if (!chats) return { chats: [], skipped: true };
+      basicChats = chats
+        .filter((c) => c.id._serialized !== "status@broadcast")
+        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+        .map((c) => ({
+          id: c.id._serialized,
+          name: c.name || c.id.user || c.id._serialized,
+          unreadCount: c.unreadCount || 0,
+          isGroup: !!c.isGroup,
+          timestamp: c.timestamp || 0,
+        }));
+    }
 
-      // Last message preview (synchronous — from in-memory store)
-      let lastMessage = "";
-      try {
-        const msgs = getStoreMessages(jid);
-        if (msgs.length > 0) {
-          const lastMsg = msgs[msgs.length - 1];
-          const media = getMediaInfo(lastMsg);
-          if (media) {
-            lastMessage = `[${media.type}]`;
-          } else {
-            lastMessage = (getMessageBody(lastMsg) || "").substring(0, 50);
-          }
-        }
-      } catch (_) {}
+    if (!basicChats || basicChats.length === 0) return { chats: [] };
 
+    // Build result objects merging basic data with the enrichment cache.
+    const result = basicChats.map((chat) => {
+      const cached = enrichedChatCache.get(chat.id);
+      const contactNumber = chat.id.includes("@")
+        ? chat.id.split("@")[0]
+        : chat.id;
       return {
-        id: jid,
-        name: displayName,
+        id: chat.id,
+        name: cached?.name || chat.name,
         number: contactNumber,
-        whatsappName,
-        unreadCount: chat.unreadCount || 0,
-        isGroup,
-        profilePicUrl: null, // loaded lazily via get-profile-pic
-        timestamp: getChatTimestamp(chat),
-        lastMessage,
+        whatsappName: cached?.whatsappName || "",
+        unreadCount: chat.unreadCount,
+        isGroup: chat.isGroup,
+        profilePicUrl: cached?.profilePicUrl || null,
+        timestamp: chat.timestamp,
+        lastMessage: cached?.lastMessage || "",
       };
     });
 
-    result.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    // ── Phase 2: Background enrichment (contact names, profile pics, last msgs) ──
+    // Run getChats() in the background — it's slow for large accounts but the
+    // UI is already rendered. Use setImmediate so the IPC reply is dispatched
+    // first (same anti-race pattern as progressive file loading).
+    if (!enrichmentInProgress && enrichedChatCache.size === 0) {
+      setImmediate(async () => {
+        try {
+          const fullChats = await retryOnDetachedFrame(() =>
+            withTimeout(whatsappClient.getChats(), 120000, null),
+          );
+          if (fullChats) {
+            const filtered = fullChats
+              .filter((c) => c.id._serialized !== "status@broadcast")
+              .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            enrichChatsInBackground(filtered);
+          }
+        } catch (e) {
+          console.error(
+            "[Enrichment] getChats() background failed:",
+            e.message,
+          );
+          enrichmentInProgress = false;
+        }
+      });
+    }
+
     return { chats: result };
   } catch (err) {
-    console.error("Error getting chats:", err);
+    const isDetached =
+      err && err.message && err.message.includes("detached Frame");
+    if (isDetached) {
+      console.warn("[get-unread-chats] Skipping refresh due to detached frame");
+      return { chats: [], skipped: true };
+    }
+    console.error("Error getting unread chats:", err);
     return { error: err.message };
   }
 });
+
+// Background enrichment: fetches contact info, profile pics, and last messages
+// in batches and streams updates to the renderer. Results are cached so
+// subsequent refreshChats() calls return enriched data instantly.
+const ENRICH_BATCH_SIZE = 10;
+async function enrichChatsInBackground(allChats) {
+  enrichmentInProgress = true;
+  for (let i = 0; i < allChats.length; i += ENRICH_BATCH_SIZE) {
+    const batch = allChats.slice(i, i + ENRICH_BATCH_SIZE);
+    const enriched = await Promise.all(
+      batch.map(async (chat) => {
+        let contactNumber = chat.id.user || chat.id._serialized;
+        let savedName = chat.name || "";
+        let whatsappName = "";
+        let profilePicUrl = null;
+
+        try {
+          const contact = await withTimeout(chat.getContact(), 5000, null);
+          if (contact) {
+            whatsappName = contact.pushname || "";
+            if (!savedName || savedName === contactNumber) {
+              savedName = contact.name || "";
+            }
+            const rawUrl = await withTimeout(
+              contact.getProfilePicUrl(),
+              3000,
+              null,
+            );
+            profilePicUrl = await withTimeout(
+              fetchProfilePicAsDataUri(rawUrl),
+              5000,
+              null,
+            );
+          }
+        } catch (e) {}
+
+        let lastMessage = "";
+        try {
+          const msgs = await withTimeout(
+            chat.fetchMessages({ limit: 1 }),
+            3000,
+            [],
+          );
+          if (msgs && msgs.length > 0) {
+            lastMessage = msgs[0].hasMedia
+              ? `[${msgs[0].type}]`
+              : (msgs[0].body || "").substring(0, 50);
+          }
+        } catch (e) {}
+
+        const displayName = savedName || whatsappName || contactNumber;
+
+        const enrichedData = {
+          id: chat.id._serialized,
+          name: displayName,
+          number: contactNumber,
+          whatsappName,
+          profilePicUrl: profilePicUrl || null,
+          lastMessage,
+        };
+
+        // Store in cache
+        enrichedChatCache.set(chat.id._serialized, enrichedData);
+
+        return enrichedData;
+      }),
+    );
+
+    // Send this batch to the renderer for live UI updates
+    mainWindow?.webContents.send("whatsapp:chat-enriched", enriched);
+  }
+  enrichmentInProgress = false;
+}
 
 // Get ALL chats — for the "All Chats" view
 ipcMain.handle("get-all-chats", async (event, { limit = 30 } = {}) => {
@@ -887,81 +701,319 @@ ipcMain.handle("get-all-chats", async (event, { limit = 30 } = {}) => {
   }
 });
 
-// Get messages with media for a specific chat
-ipcMain.handle("get-chat-files", async (event, chatId) => {
+// Get messages with media for a specific chat.
+// Phase 1: reads WhatsApp Web's in-memory message store via pupPage.evaluate()
+//          — synchronous, completes in <100ms regardless of chat size.
+// Phase 2: background getChatById()+fetchMessages() fetches messages that are
+//          not yet loaded in the page memory (older history), streamed as batches.
+ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
   if (!isClientReady) return { error: "WhatsApp not ready" };
 
   try {
-    const allMessages = getStoreMessages(chatId);
-    const messages = allMessages.slice(-50);
+    const _t0 = Date.now();
+    console.log(`[Files] START chatId=${chatId}`);
 
-    const chatInfo = store.chats?.get?.(chatId) || null;
-    const unreadCount = chatInfo?.unreadCount || 0;
-
-    // Determine which messages are unread
-    const sortedMsgs = [...messages].sort(
-      (a, b) =>
-        toTimestamp(a.messageTimestamp) - toTimestamp(b.messageTimestamp),
-    );
+    // ── Fast path: read from WhatsApp Web's in-memory message store ──────────
+    // window.Store.Chat.get(chatId).msgs contains every message WhatsApp Web
+    // has already loaded — no network, no Puppeteer serialization overhead.
+    let storeMessages = [];
+    let unreadCount = 0;
     const unreadMsgIds = new Set();
-    if (unreadCount > 0) {
-      const unreadSlice = sortedMsgs.slice(-unreadCount);
-      unreadSlice.forEach((m) => unreadMsgIds.add(serializeMessageId(m.key)));
+    try {
+      const storeData = await whatsappClient.pupPage.evaluate((cid) => {
+        const chat = window.Store?.Chat?.get?.(cid);
+        if (!chat) return null;
+        const allMsgs = chat.msgs?.getModelsArray?.() || [];
+        const unreadCount = chat.unreadCount || 0;
+
+        // Compute unread IDs from ALL messages (text + media) so that
+        // slice(-unreadCount) correctly identifies the last N messages
+        // regardless of type. Filtering to media-only first would cause
+        // unread detection to break when most unread messages are text.
+        const sortedAll = [...allMsgs].sort((a, b) => (a.t || 0) - (b.t || 0));
+        const unreadIds =
+          unreadCount > 0
+            ? sortedAll
+                .slice(-unreadCount)
+                .map((m) => m.id?._serialized)
+                .filter(Boolean)
+            : [];
+
+        // Only printable types are relevant for a print manager: images and documents.
+        const MEDIA_TYPES = ["image", "document"];
+
+        return {
+          unreadCount,
+          unreadIds,
+          messages: allMsgs
+            .filter((m) => m.hasMedia || MEDIA_TYPES.includes(m.type))
+            .map((m) => ({
+              id: m.id?._serialized,
+              type: m.type || "file",
+              timestamp: m.t || 0,
+              body: m.body || m.caption || "",
+              fileName: m.filename || m.mediaFilename || null,
+              mimeType: m.mimetype || null,
+              fileSize: m.size || m.filesize || null,
+            })),
+        };
+      }, chatId);
+
+      if (storeData) {
+        storeMessages = (storeData.messages || []).filter((m) => m.id);
+        unreadCount = storeData.unreadCount;
+        // unreadIds from the store are already correctly computed from all msgs
+        (storeData.unreadIds || []).forEach((id) => unreadMsgIds.add(id));
+      }
+      console.log(
+        `[Files] store read in ${Date.now() - _t0}ms — ${storeMessages.length} media msgs in memory, ${unreadMsgIds.size} unread IDs`,
+      );
+    } catch (e) {
+      console.warn("[Files] Memory store fast path failed:", e.message);
     }
 
-    const files = [];
-    for (const msg of messages) {
-      const media = getMediaInfo(msg);
-      if (!media) continue;
+    // Merge client-tracked IDs (real-time onNewMessage events) into unread set
+    if (Array.isArray(trackedUnreadIds)) {
+      trackedUnreadIds.forEach((id) => unreadMsgIds.add(id));
+    }
 
-      const msgId = serializeMessageId(msg.key);
-
-      // Sender info
-      let senderName = "Unknown";
-      if (msg.key.fromMe) {
-        senderName = "You";
-      } else if (msg.pushName) {
-        senderName = msg.pushName;
-      } else {
-        const senderJid = msg.key.participant || msg.key.remoteJid;
-        const contact = getContact(senderJid);
-        senderName =
-          contact?.notify ||
-          contact?.name ||
-          senderJid?.split("@")[0] ||
-          "Unknown";
-      }
-
-      let fileName = media.fileName;
+    // Extract file info from raw in-memory store data (Node.js side)
+    function extractFromRaw(raw) {
+      let { fileName, mimeType, fileSize } = raw;
       if (!fileName) {
         const ext =
-          mime.extension(media.mimetype || "application/octet-stream") || "bin";
-        fileName = `${media.type || "file"}_${toTimestamp(msg.messageTimestamp)}.${ext}`;
+          mime.extension(mimeType || "application/octet-stream") || "bin";
+        fileName = `${raw.type || "file"}_${raw.timestamp}.${ext}`;
       }
-
-      // Check if already downloaded
-      const safeMsgId = msgId.replace(/[^a-zA-Z0-9]/g, "_");
-      const expectedPath = path.join(DOWNLOADS_DIR, `${safeMsgId}_${fileName}`);
+      const safeId = (raw.id || "").replace(/[^a-zA-Z0-9]/g, "_");
+      const expectedPath = path.join(DOWNLOADS_DIR, `${safeId}_${fileName}`);
       const isDownloaded = fs.existsSync(expectedPath);
-
-      files.push({
-        messageId: msgId,
+      return {
+        messageId: raw.id,
         chatId,
-        sender: senderName,
-        timestamp: toTimestamp(msg.messageTimestamp),
-        type: media.type,
-        caption: media.caption,
+        sender: "Unknown",
+        timestamp: raw.timestamp,
+        type: raw.type,
+        caption: raw.body,
         fileName,
-        mimeType: media.mimetype,
-        fileSize: media.fileSize,
+        mimeType,
+        fileSize,
         isDownloaded,
         localPath: isDownloaded ? expectedPath : null,
-        isUnread: unreadMsgIds.has(msgId),
-      });
+        isUnread: unreadMsgIds.has(raw.id),
+      };
     }
 
-    files.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-    return { files, unreadCount };
+    // Helper for whatsapp-web.js message objects (used in background fetch)
+    function extractFileInfo(msg) {
+      const info = {
+        messageId: msg.id._serialized,
+        chatId,
+        sender: "Unknown",
+        timestamp: msg.timestamp,
+        type: msg.type,
+        caption: msg.body || "",
+        // Try both capitalisations — WhatsApp Web store uses lowercase 'filename'
+        // but some ww.js versions alias it as 'fileName' (capital N).
+        fileName: msg._data?.fileName || msg._data?.filename || null,
+        mimeType: msg._data?.mimetype || msg._data?.mimeType || null,
+        fileSize: msg._data?.size || null,
+        isDownloaded: false,
+        localPath: null,
+        isUnread: unreadMsgIds.has(msg.id._serialized),
+      };
+      if (!info.fileName) {
+        const ext =
+          mime.extension(info.mimeType || "application/octet-stream") || "bin";
+        info.fileName = `${info.type || "file"}_${msg.timestamp}.${ext}`;
+      }
+      const expectedPath = path.join(
+        DOWNLOADS_DIR,
+        `${msg.id._serialized.replace(/[^a-zA-Z0-9]/g, "_")}_${info.fileName}`,
+      );
+      if (fs.existsSync(expectedPath)) {
+        info.isDownloaded = true;
+        info.localPath = expectedPath;
+      }
+      return info;
+    }
+
+    const storeFiles = storeMessages.map(extractFromRaw);
+    const unreadFiles = storeFiles.filter((f) => f.isUnread);
+    const olderStoreFiles = storeFiles.filter((f) => !f.isUnread);
+    unreadFiles.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    olderStoreFiles.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    // IDs already sent — used to deduplicate against server fetch
+    const sentIds = new Set(storeFiles.map((f) => f.messageId));
+
+    console.log(
+      `[Files] split: ${unreadFiles.length} unread, ${olderStoreFiles.length} older in memory`,
+    );
+
+    // ── Background: send older in-memory files, then fetch from server ────────
+    // setImmediate ensures the IPC reply is dispatched first so the renderer
+    // DOM is ready before any batch arrives (prevents the wipe-on-resume race).
+    setImmediate(async () => {
+      const FILE_BATCH_SIZE = 10;
+      try {
+        // 1. Send older in-memory files immediately (no network required)
+        if (olderStoreFiles.length > 0) {
+          for (let i = 0; i < olderStoreFiles.length; i += FILE_BATCH_SIZE) {
+            mainWindow?.webContents.send("whatsapp:chat-files-batch", {
+              chatId,
+              files: olderStoreFiles.slice(i, i + FILE_BATCH_SIZE),
+              done: false,
+            });
+          }
+        }
+
+        // 2. Fetch from server to surface messages not yet loaded in memory
+        let serverMessages = [];
+        try {
+          const chat = await retryOnDetachedFrame(() =>
+            whatsappClient.getChatById(chatId),
+          );
+          serverMessages = await retryOnDetachedFrame(() =>
+            chat.fetchMessages({ limit: 100 }),
+          );
+          console.log(
+            `[Files] fetchMessages done in ${Date.now() - _t0}ms — ${serverMessages.length} server msgs`,
+          );
+        } catch (e) {
+          console.warn("[Files] fetchMessages failed:", e.message);
+        }
+
+        // 3. Only process messages not already shown from the in-memory store.
+        // Restrict to printable types only (images and documents).
+        const PRINTABLE_TYPES = ["image", "document"];
+        const newMediaMsgs = serverMessages
+          .filter(
+            (m) =>
+              (m.hasMedia || PRINTABLE_TYPES.includes(m.type)) &&
+              !sentIds.has(m.id._serialized),
+          )
+          .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+        const newFiles = newMediaMsgs.map(extractFileInfo);
+
+        if (newFiles.length > 0) {
+          for (let i = 0; i < newFiles.length; i += FILE_BATCH_SIZE) {
+            mainWindow?.webContents.send("whatsapp:chat-files-batch", {
+              chatId,
+              files: newFiles.slice(i, i + FILE_BATCH_SIZE),
+              done: i + FILE_BATCH_SIZE >= newFiles.length,
+            });
+          }
+        } else {
+          // Nothing new from server — signal done so loading indicator clears
+          mainWindow?.webContents.send("whatsapp:chat-files-batch", {
+            chatId,
+            files: [],
+            done: true,
+          });
+        }
+
+        // 4. Fix isDownloaded status for files already shown in Phase 1 and
+        //    auto-download any unread files genuinely missing from disk.
+        //
+        //    Phase 1 reads filenames from raw store model properties (m.filename)
+        //    which may differ from msg._data?.fileName used by extractFileInfo,
+        //    causing Phase 1 to report isDownloaded=false even when the file is
+        //    already on disk.  Phase 2 skips those messages via sentIds, so no
+        //    correction ever reaches the renderer.  We fix that here.
+        const allPrintable = serverMessages.filter(
+          (m) => m.hasMedia || PRINTABLE_TYPES.includes(m.type),
+        );
+        for (const msg of allPrintable) {
+          const info = extractFileInfo(msg);
+          const wasInPhase1 = sentIds.has(info.messageId);
+
+          if (info.isDownloaded && wasInPhase1) {
+            // Correct a Phase-1 false-negative (filename capitalisation mismatch)
+            mainWindow?.webContents.send("whatsapp:file-auto-downloaded", {
+              chatId,
+              messageId: info.messageId,
+              localPath: info.localPath,
+              fileName: info.fileName,
+            });
+          } else if (!info.isDownloaded && unreadMsgIds.has(info.messageId)) {
+            // Unread file not on disk — download it now so it can be selected.
+            try {
+              const media = await msg.downloadMedia();
+              if (!media) continue;
+              let finalFileName =
+                msg._data?.fileName ||
+                msg._data?.filename ||
+                media.filename ||
+                null;
+              if (!finalFileName) {
+                const ext = mime.extension(media.mimetype) || "bin";
+                finalFileName = `${msg.type || "file"}_${msg.timestamp}.${ext}`;
+              }
+              const safeMsgId = msg.id._serialized.replace(
+                /[^a-zA-Z0-9]/g,
+                "_",
+              );
+              const localPath = path.join(
+                DOWNLOADS_DIR,
+                `${safeMsgId}_${finalFileName}`,
+              );
+              if (!fs.existsSync(localPath)) {
+                const buffer = Buffer.from(media.data, "base64");
+                fs.writeFileSync(localPath, buffer);
+              }
+              mainWindow?.webContents.send("whatsapp:file-auto-downloaded", {
+                chatId,
+                messageId: msg.id._serialized,
+                localPath,
+                fileName: finalFileName,
+              });
+            } catch (e) {
+              console.warn(
+                `[Files] Auto-download failed for ${msg.id._serialized}:`,
+                e.message,
+              );
+            }
+          }
+        }
+
+        // 5. Resolve sender names for printable messages only
+        const allWWJSMedia = serverMessages.filter(
+          (m) => m.hasMedia || PRINTABLE_TYPES.includes(m.type),
+        );
+        for (const msg of allWWJSMedia) {
+          try {
+            const contact = await msg.getContact();
+            const name =
+              contact.pushname || contact.name || contact.number || "Unknown";
+            mainWindow?.webContents.send("whatsapp:file-sender-resolved", {
+              chatId,
+              messageId: msg.id._serialized,
+              sender: name,
+            });
+          } catch (e) {}
+        }
+      } catch (err) {
+        console.error("[Files] Background task failed:", err.message);
+        mainWindow?.webContents.send("whatsapp:chat-files-batch", {
+          chatId,
+          files: [],
+          done: true,
+        });
+      }
+    });
+
+    console.log(
+      `[Files] returning Phase 1 at ${Date.now() - _t0}ms — ${unreadFiles.length} unread, hasOlderFiles=${storeFiles.length > 0 || true}`,
+    );
+    return {
+      files: unreadFiles,
+      unreadCount,
+      // Always true — background always runs to fetch additional server data.
+      // Renderer handles empty-state via onChatFilesBatch done+empty check.
+      hasOlderFiles: true,
+    };
   } catch (err) {
     console.error("Error getting chat files:", err);
     return { error: err.message };
@@ -1109,36 +1161,135 @@ ipcMain.handle(
     const { exec, execFile } = require("child_process");
     const results = [];
 
-    // Resolve the actual printer name (if empty, find Windows default)
-    let targetPrinter = printerName;
-    if (!targetPrinter) {
-      try {
-        targetPrinter = await new Promise((resolve, reject) => {
-          exec(
-            'powershell -Command "(Get-CimInstance Win32_Printer | Where-Object Default -eq $true).Name"',
-            (err, stdout) => {
-              if (err) reject(err);
-              else resolve(stdout.trim());
-            },
-          );
-        });
-      } catch (e) {
-        console.error("Could not detect default printer:", e);
-        return {
-          error: "No printer selected and could not detect default printer",
-        };
+    // If no printer is selected, open Electron's system print dialog (Ctrl+Shift+P equivalent)
+    if (!printerName) {
+      const { pathToFileURL } = require("url");
+      const imageExts = [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".bmp",
+        ".gif",
+        ".tiff",
+        ".tif",
+        ".webp",
+      ];
+      for (const filePath of filePaths) {
+        try {
+          if (!fs.existsSync(filePath)) {
+            results.push({ filePath, error: "File not found" });
+            continue;
+          }
+          await new Promise((resolve, reject) => {
+            const ext = path.extname(filePath).toLowerCase();
+            const fileUrl = pathToFileURL(filePath).href;
+            const isImage = imageExts.includes(ext);
+
+            const printWin = new BrowserWindow({
+              show: false,
+              width: 800,
+              height: 1100,
+              webPreferences: {
+                contextIsolation: true,
+                nodeIntegration: false,
+              },
+            });
+
+            let tempHtmlPath = null;
+            const cleanup = () => {
+              if (tempHtmlPath) {
+                try {
+                  fs.unlinkSync(tempHtmlPath);
+                } catch {}
+                tempHtmlPath = null;
+              }
+            };
+
+            const doPrint = () => {
+              // Delay lets the renderer finish painting before print is triggered,
+              // preventing blank pages on hidden windows.
+              setTimeout(() => {
+                printWin.webContents.print(
+                  { silent: false },
+                  (success, errorType) => {
+                    printWin.close();
+                    cleanup();
+                    if (success) resolve();
+                    else reject(new Error(errorType || "Print cancelled"));
+                  },
+                );
+              }, 500);
+            };
+
+            if (isImage) {
+              // Wrap image in a full HTML page so the renderer has proper content
+              // to paint. Loading a raw file:// image URL can produce a blank print
+              // because the browser's image-viewer wrapper is not fully rendered in
+              // a hidden window before print() is called.
+              const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; background: white; }
+img { max-width: 100%; height: auto; display: block; }
+@media print { img { max-width: 100%; page-break-inside: avoid; } }
+</style>
+</head>
+<body><img src="${fileUrl}"></body>
+</html>`;
+              tempHtmlPath = path.join(
+                os.tmpdir(),
+                `wpm-print-${Date.now()}.html`,
+              );
+              fs.writeFileSync(tempHtmlPath, htmlContent, "utf8");
+              printWin.loadFile(tempHtmlPath);
+            } else {
+              printWin.loadURL(fileUrl);
+            }
+
+            printWin.webContents.once("did-finish-load", doPrint);
+
+            printWin.webContents.once("did-fail-load", (_ev, code, desc) => {
+              printWin.close();
+              cleanup();
+              reject(new Error(desc || `Load failed (${code})`));
+            });
+          });
+          results.push({
+            filePath,
+            success: true,
+            method: "system-print-dialog",
+          });
+        } catch (err) {
+          // "Print cancelled" is not a real error — the user closed the dialog
+          if (err.message === "Print cancelled") {
+            results.push({
+              filePath,
+              success: true,
+              method: "system-print-dialog",
+            });
+          } else {
+            console.error(
+              `[Print] Error opening system print dialog for ${filePath}:`,
+              err,
+            );
+            results.push({ filePath, error: err.message });
+          }
+        }
       }
+      return { results };
     }
 
-    if (!targetPrinter) {
-      return { error: "No printer available" };
-    }
+    const targetPrinter = printerName;
 
     // Step 1: Open the printer driver's Printing Preferences dialog
     try {
       console.log(`[Print] Opening preferences for printer: ${targetPrinter}`);
-      await new Promise((resolve, reject) => {
-        const cmd = `printui /e /n "${targetPrinter.replace(/"/g, '\\"')}"  `;
+      await new Promise((resolve) => {
+        // printui /e opens "Printing Preferences" for the named printer
+        const cmd = `printui /e /n "${targetPrinter.replace(/"/g, '\\"')}"`;
         exec(cmd, (error) => {
           if (error) {
             console.error("[Print] Preferences dialog error:", error.message);
@@ -1242,6 +1393,62 @@ ipcMain.handle("open-file", async (event, filePath) => {
   return { error: "File not found" };
 });
 
+// Open multiple images in the Windows "Print Pictures" dialog
+ipcMain.handle("open-print-pictures", async (event, filePaths) => {
+  try {
+    if (process.platform !== "win32") {
+      for (const fp of filePaths) require("electron").shell.openPath(fp);
+      return { success: true };
+    }
+    const os = require("os");
+    const path = require("path");
+    const { exec } = require("child_process");
+    const batchId = Date.now().toString();
+    const tempDir = path.join(
+      os.tmpdir(),
+      "WhatsappPrintManager_Batch_" + batchId,
+    );
+    const fsSync = require("fs");
+    fsSync.mkdirSync(tempDir, { recursive: true });
+
+    for (const fp of filePaths) {
+      if (fsSync.existsSync(fp)) {
+        const dest = path.join(tempDir, path.basename(fp));
+        fsSync.copyFileSync(fp, dest);
+      }
+    }
+
+    const psScriptPath = path.join(tempDir, "print.ps1");
+    // Keep the COM host alive long enough for the system print dialog to stay stable.
+    // Avoid matching a localized window title ("Print Pictures"), which fails on
+    // non-English Windows and can close the dialog a few seconds after opening.
+    const psScriptContent = `$ErrorActionPreference = 'SilentlyContinue'
+  $shell = New-Object -ComObject Shell.Application
+  $folder = $shell.Namespace('${tempDir}')
+  if ($folder) {
+    $items = $folder.Items()
+    if ($items.Count -gt 0) {
+      $items.InvokeVerbEx('Print')
+      Start-Sleep -Seconds 300
+    }
+  }`;
+    fsSync.writeFileSync(psScriptPath, psScriptContent, "utf8");
+
+    // Execute script invisibly, won't block electron UI
+    exec(
+      `powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File "${psScriptPath}"`,
+      (err) => {
+        if (err) console.error("Print Pictures background loop error:", err);
+      },
+    );
+
+    return { success: true };
+  } catch (err) {
+    console.error("open-print-pictures error:", err);
+    return { error: err.message };
+  }
+});
+
 // Delete downloaded files + optionally delete from WhatsApp chat
 ipcMain.handle(
   "delete-files",
@@ -1306,17 +1513,10 @@ ipcMain.handle("mark-chat-read", async (event, chatId) => {
 ipcMain.handle("reconnect-whatsapp", async () => {
   try {
     isClientReady = false;
-    stopStorePersistence();
-    try {
-      store.writeToFile(getStorePath());
-    } catch (_) {}
-    if (sock) {
-      try {
-        sock.end(undefined);
-      } catch (_) {}
-      sock = null;
-    }
-    await initWhatsApp();
+    // Clear cached chat enrichment so the new session starts fresh
+    enrichedChatCache.clear();
+    enrichmentInProgress = false;
+    initWhatsApp();
     return { success: true };
   } catch (err) {
     console.error("[WhatsApp] Reconnect failed:", err.message);
@@ -1462,8 +1662,9 @@ ipcMain.handle("logout-whatsapp", async () => {
 
   isClientReady = false;
 
-  // Clear stale chat/contact/message data
-  resetStore();
+  // Clear cached chat enrichment so the new account starts completely fresh
+  enrichedChatCache.clear();
+  enrichmentInProgress = false;
 
   // Clear auth data so a new QR is shown
   const authPath = getUserDataPath(".baileys_auth");
@@ -1482,6 +1683,47 @@ ipcMain.handle("logout-whatsapp", async () => {
       console.error("[WhatsApp] Re-init after logout failed:", err.message);
     });
   }, 1000);
+
+  return { success: true };
+});
+
+// Logout + full app restart (ensures account unlink and clean QR on next launch)
+ipcMain.handle("logout-and-restart", async () => {
+  try {
+    if (whatsappClient) {
+      try {
+        await whatsappClient.logout();
+      } catch (e) {
+        console.error("[LogoutRestart] logout() failed:", e?.message || e);
+      }
+      try {
+        await whatsappClient.destroy();
+      } catch (e) {
+        console.error("[LogoutRestart] destroy() failed:", e?.message || e);
+      }
+    }
+
+    isClientReady = false;
+    enrichedChatCache.clear();
+    enrichmentInProgress = false;
+
+    // Remove persisted auth/version caches to force QR for a new account.
+    const authPath = getUserDataPath(".wwebjs_auth");
+    const cachePath = getUserDataPath(".wwebjs_cache");
+    try {
+      fs.rmSync(authPath, { recursive: true, force: true });
+    } catch (e) {
+      console.error("[LogoutRestart] Failed clearing auth data:", e);
+    }
+    try {
+      fs.rmSync(cachePath, { recursive: true, force: true });
+    } catch (e) {
+      console.error("[LogoutRestart] Failed clearing version cache:", e);
+    }
+  } finally {
+    app.relaunch();
+    app.exit(0);
+  }
 
   return { success: true };
 });
@@ -1694,6 +1936,12 @@ ipcMain.handle("check-for-updates", async () => {
 
 ipcMain.handle("get-app-version", () => {
   return app.getVersion();
+});
+
+ipcMain.handle("restart-app", () => {
+  app.relaunch();
+  app.exit(0);
+  return { success: true };
 });
 
 ipcMain.on("cancel-update", () => {

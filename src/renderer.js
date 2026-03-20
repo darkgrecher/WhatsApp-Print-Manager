@@ -8,6 +8,9 @@ let selectedFiles = new Set();
 let autoRefreshTimer = null;
 let isRefreshing = false; // guard against re-entrant refresh
 let showAllChats = false; // toggle between "recent/unread" and "all chats"
+let newMessageRefreshTimer = null; // debounce timer for post-notification refresh
+let newMessageFileReloadTimer = null; // debounce timer for file list reload
+const pendingUnreadIds = new Map(); // chatId → Set<messageId> tracked client-side
 const AUTO_REFRESH_INTERVAL = 10000; // 10 seconds
 
 // ── Initialization ───────────────────────────────────────────────────────
@@ -22,6 +25,19 @@ function setupButtonListeners() {
   // Reconnect button
   const btnReconnect = document.getElementById("btn-reconnect");
   if (btnReconnect) btnReconnect.addEventListener("click", () => reconnect());
+
+  const btnLoginAgain = document.getElementById("btn-login-again");
+  if (btnLoginAgain) {
+    btnLoginAgain.addEventListener("click", () => {
+      btnLoginAgain.classList.add("hidden");
+      if (btnReconnect) btnReconnect.classList.add("hidden");
+      const qrStatus = document.getElementById("qr-status");
+      if (qrStatus) qrStatus.textContent = "Clearing session and restarting...";
+      const spinner = document.querySelector(".spinner");
+      if (spinner) spinner.style.display = "inline-block";
+      restartApplication();
+    });
+  }
 
   // Topbar buttons
   const btnRefresh = document.getElementById("btn-refresh");
@@ -67,13 +83,13 @@ function setupButtonListeners() {
   });
 
   // File action buttons
-  const btnSelectAll = document.getElementById("btn-select-all");
-  if (btnSelectAll)
-    btnSelectAll.addEventListener("click", () => toggleSelectAll());
+  const btnUnselectAll = document.getElementById("btn-unselect-all");
+  if (btnUnselectAll)
+    btnUnselectAll.addEventListener("click", () => unselectAllFiles());
 
-  const btnPrintSelected = document.getElementById("btn-print-selected");
-  if (btnPrintSelected)
-    btnPrintSelected.addEventListener("click", () => printSelected());
+  const btnOpenSelected = document.getElementById("btn-open-selected");
+  if (btnOpenSelected)
+    btnOpenSelected.addEventListener("click", () => openSelected());
 
   const fabDelete = document.getElementById("fab-delete");
   if (fabDelete) fabDelete.addEventListener("click", () => deleteSelected());
@@ -139,7 +155,7 @@ function setupButtonListeners() {
 
   const btnCheckAgainError = document.getElementById("btn-check-again-error");
   if (btnCheckAgainError)
-    btnCheckAgainError.addEventListener("click", () => recheckLicense());
+    btnCheckAgainError.addEventListener("click", () => restartApplication());
 
   const btnLicenseLogout = document.getElementById("btn-license-logout");
   if (btnLicenseLogout)
@@ -156,13 +172,15 @@ function setupEventListeners() {
 
   // WhatsApp QR Code
   window.api.onQRCode((qrDataURL) => {
+    stopInitTimer();
     const qrImg = document.getElementById("qr-image");
     const qrStatus = document.getElementById("qr-status");
     const spinner = document.querySelector(".spinner");
 
     qrImg.src = qrDataURL;
     qrImg.classList.remove("hidden");
-    qrStatus.textContent = "Scan this QR code with WhatsApp on your phone";
+    if (qrStatus)
+      qrStatus.textContent = "Scan this QR code with WhatsApp on your phone";
     if (spinner) spinner.style.display = "none";
   });
 
@@ -172,10 +190,19 @@ function setupEventListeners() {
     const badge = document.getElementById("connection-badge");
 
     switch (status) {
+      case "launching":
+        setQrStatus("Starting browser...");
+        startInitTimer();
+        break;
+      case "qr_ready":
+        stopInitTimer();
+        break;
       case "authenticated":
+        stopInitTimer();
         showLoginLoading();
         break;
       case "ready":
+        stopInitTimer();
         validateLicense();
         break;
       case "disconnected":
@@ -190,9 +217,24 @@ function setupEventListeners() {
       case "auth_failure":
         showToast("Authentication failed. Please try again.", "error");
         document.getElementById("btn-reconnect").classList.remove("hidden");
+        document.getElementById("btn-login-again").classList.remove("hidden");
+        break;
+      case "error":
+        stopInitTimer();
+        const qrStatusError = document.getElementById("qr-status");
+        if (qrStatusError)
+          qrStatusError.textContent =
+            "Connection failed due to a stale session or timeout.";
+        const spinnerError = document.querySelector(".spinner");
+        if (spinnerError) spinnerError.style.display = "none";
+
+        document.getElementById("btn-reconnect").classList.remove("hidden");
+        document.getElementById("btn-login-again").classList.remove("hidden");
+        showToast("Initialization failed.", "error");
         break;
       case "retrying":
         {
+          stopInitTimer();
           const qrImg = document.getElementById("qr-image");
           const qrStatus = document.getElementById("qr-status");
           const spinner = document.querySelector(".spinner");
@@ -200,6 +242,7 @@ function setupEventListeners() {
           if (spinner) spinner.style.display = "";
           if (qrStatus)
             qrStatus.textContent = "Session expired. Reconnecting...";
+          startInitTimer();
         }
         showToast(
           "Session expired, reconnecting with fresh session...",
@@ -213,7 +256,7 @@ function setupEventListeners() {
     }
   });
 
-  // Loading screen
+  // Loading screen (WhatsApp Web loading_screen events — fires after auth)
   window.api.onLoading(({ percent, message }) => {
     const fill = document.getElementById("loading-bar-fill");
     const text = document.getElementById("loading-text");
@@ -245,41 +288,328 @@ function setupEventListeners() {
     }
   });
 
-  // ── Profile pic received asynchronously ──
-  window.api.onProfilePic(({ jid, profilePicUrl, isSelf }) => {
-    if (isSelf && profilePicUrl) {
-      const name = document.getElementById("profile-name")?.textContent || "";
-      const initials = getInitials(name);
-      const imgHtml = `<img src="${escapeHtml(profilePicUrl)}" alt="" onerror="this.parentElement.textContent='${initials}'">`;
-      const profileAvatar = document.getElementById("profile-avatar");
-      if (profileAvatar) profileAvatar.innerHTML = imgHtml;
-      const dropdownAvatar = document.getElementById("dropdown-avatar");
-      if (dropdownAvatar) dropdownAvatar.innerHTML = imgHtml;
+  // ── Progressive chat enrichment ──
+  // As the backend streams enriched chat data (profile pics, last messages,
+  // resolved names), update each chat item in-place without rebuilding.
+  window.api.onChatEnriched((batch) => {
+    for (const data of batch) {
+      const el = document.querySelector(
+        `.chat-item[data-chat-id="${CSS.escape(data.id)}"]`,
+      );
+      if (!el) continue;
+
+      // Update stored chat data
+      if (window._chatData && window._chatData[data.id]) {
+        Object.assign(window._chatData[data.id], data);
+      }
+
+      // Update display name if enrichment resolved a better one
+      if (data.name) {
+        const nameEl = el.querySelector(".chat-name");
+        if (nameEl) {
+          const isGroup = nameEl.textContent.includes("\uD83D\uDC65");
+          nameEl.textContent = data.name + (isGroup ? " \uD83D\uDC65" : "");
+        }
+        el.dataset.chatName = data.name;
+      }
+
+      // Update profile picture
+      if (data.profilePicUrl) {
+        const avatarEl = el.querySelector(".chat-avatar");
+        if (avatarEl) {
+          const initials = getInitials(data.name || "");
+          avatarEl.innerHTML = `<img src="${escapeHtml(data.profilePicUrl)}" alt="" onerror="this.parentElement.textContent='${initials}'">`;
+        }
+      }
+
+      // Update last message preview
+      if (data.lastMessage) {
+        let lastMsgEl = el.querySelector(".chat-last-msg");
+        if (lastMsgEl) {
+          lastMsgEl.textContent = data.lastMessage;
+        } else {
+          const chatInfo = el.querySelector(".chat-info");
+          if (chatInfo) {
+            const div = document.createElement("div");
+            div.className = "chat-last-msg";
+            div.textContent = data.lastMessage;
+            chatInfo.appendChild(div);
+          }
+        }
+      }
+    }
+  });
+
+  // ── Progressive file loading ──
+  // Older files arrive in batches via IPC after unread files were returned.
+  window.api.onChatFilesBatch(({ chatId, files, done }) => {
+    console.log(
+      `[onChatFilesBatch] chatId=${chatId} files=${files.length} done=${done} (currentChatId=${currentChatId})`,
+    );
+    // Ignore batches for a chat we're no longer viewing
+    if (chatId !== currentChatId) return;
+
+    if (files.length > 0) {
+      currentFiles.push(...files);
+      document.getElementById("file-count").textContent =
+        `${currentFiles.length} file${currentFiles.length !== 1 ? "s" : ""}`;
+
+      const fileList = document.getElementById("file-list");
+      const batchUnread = files.filter((f) => f.isUnread);
+      const batchSeen = files.filter((f) => !f.isUnread);
+
+      // ── Unread files arriving via batch ─────────────────────────────────
+      // Happens when fetchMessages() surfaces a new message that was not yet
+      // in the WhatsApp Web memory store during Phase 1.
+      if (batchUnread.length > 0) {
+        // Auto-select downloaded unread files (same behaviour as Phase 1)
+        batchUnread
+          .filter((f) => f.isDownloaded)
+          .forEach((f) => selectedFiles.add(f.messageId));
+        updateSelectionUI();
+
+        const totalUnread = currentFiles.filter((f) => f.isUnread).length;
+        let newSectionFiles = fileList.querySelector(".new-section-files");
+
+        if (!newSectionFiles) {
+          // Phase 1 returned nothing unread — build the whole section now
+          const insertBefore =
+            fileList.querySelector(".older-files-loading") ||
+            fileList.querySelector(".seen-section");
+          const sectionHtml =
+            `<div class="file-section-header new-section">` +
+            `<span class="section-icon">🔔</span>` +
+            `<span>New Files (<span class="new-count">${totalUnread}</span>)</span>` +
+            `</div><div class="new-section-files"></div>`;
+          if (insertBefore) {
+            insertBefore.insertAdjacentHTML("beforebegin", sectionHtml);
+          } else {
+            fileList.insertAdjacentHTML("afterbegin", sectionHtml);
+          }
+          newSectionFiles = fileList.querySelector(".new-section-files");
+        } else {
+          const countEl = fileList.querySelector(".new-section .new-count");
+          if (countEl) countEl.textContent = totalUnread;
+        }
+
+        // Append into the isolated container so date keys stay within this
+        // section and don't accidentally merge into "Previously Seen".
+        appendFilesGrouped(batchUnread, newSectionFiles, null);
+      }
+
+      // ── Seen (older) files arriving via batch ────────────────────────────
+      if (batchSeen.length > 0) {
+        const seenCount = currentFiles.filter((f) => !f.isUnread).length;
+        const hasNewSection = fileList.querySelector(".new-section");
+        let seenSectionFiles = fileList.querySelector(".seen-section-files");
+
+        if (!seenSectionFiles) {
+          if (hasNewSection) {
+            // Create the "Previously Seen" section with an isolated container
+            const loadingEl = fileList.querySelector(".older-files-loading");
+            const sectionHtml =
+              `<div class="file-section-header seen-section">` +
+              `<span class="section-icon">📂</span>` +
+              `<span>Previously Seen (<span class="seen-count">${seenCount}</span>)</span>` +
+              `</div><div class="seen-section-files"></div>`;
+            if (loadingEl) {
+              loadingEl.insertAdjacentHTML("beforebegin", sectionHtml);
+            } else {
+              fileList.insertAdjacentHTML("beforeend", sectionHtml);
+            }
+            seenSectionFiles = fileList.querySelector(".seen-section-files");
+          } else {
+            // No unread section — flat list, no header needed
+            const loadingEl = fileList.querySelector(".older-files-loading");
+            appendFilesGrouped(batchSeen, fileList, loadingEl);
+          }
+        } else {
+          const countEl = fileList.querySelector(".seen-section .seen-count");
+          if (countEl) countEl.textContent = seenCount;
+        }
+
+        if (seenSectionFiles) {
+          appendFilesGrouped(batchSeen, seenSectionFiles, null);
+        }
+      }
+
+      attachFileEventListeners(fileList);
+    }
+
+    // Remove loading indicator when done
+    if (done) {
+      const fileList = document.getElementById("file-list");
+      const loadingEl = fileList.querySelector(".older-files-loading");
+      if (loadingEl) loadingEl.remove();
+
+      // If nothing loaded at all (no unread, no older), show empty state
+      if (currentFiles.length === 0) {
+        fileList.innerHTML = `<div class="empty-state"><p>No media files found in this chat</p></div>`;
+        document.getElementById("file-count").textContent = "0 files";
+      }
+
+      // Load thumbnails for any new PDF files
+      loadDocumentThumbnails();
+    }
+  });
+
+  // ── Auto-downloaded file notification ──
+  // Fires when Phase 2 either confirms a file is already on disk (correcting
+  // a Phase-1 false-negative) or has just freshly downloaded an unread file.
+  window.api.onFileAutoDownloaded(
+    ({ chatId, messageId, localPath, fileName }) => {
+      if (chatId !== currentChatId) return;
+
+      // Update in-memory record
+      const file = currentFiles.find((f) => f.messageId === messageId);
+      if (!file) return;
+      file.isDownloaded = true;
+      file.localPath = localPath;
+      if (fileName) file.fileName = fileName;
+
+      // Update DOM: enable the checkbox
+      const safeMsgId = messageId.replace(/[^a-zA-Z0-9]/g, "_");
+      const fileEl = document.getElementById(`file-${safeMsgId}`);
+      if (fileEl) {
+        const checkbox = fileEl.querySelector(".file-checkbox");
+        if (checkbox) {
+          checkbox.disabled = false;
+          checkbox.removeAttribute("title");
+        }
+      }
+
+      // Auto-select unread files (same behaviour as selectChat's initial render)
+      if (file.isUnread && !selectedFiles.has(messageId)) {
+        selectedFiles.add(messageId);
+        if (fileEl) {
+          fileEl.classList.add("selected");
+          const checkbox = fileEl.querySelector(".file-checkbox");
+          if (checkbox) checkbox.checked = true;
+        }
+        updateSelectionUI();
+      }
+    },
+  );
+
+  // ── Sender name resolution for unread files ──
+  window.api.onFileSenderResolved(({ chatId, messageId, sender }) => {
+    if (chatId !== currentChatId) return;
+    // Update in currentFiles
+    const file = currentFiles.find((f) => f.messageId === messageId);
+    if (file) file.sender = sender;
+    // Update in DOM
+    const safeMsgId = messageId.replace(/[^a-zA-Z0-9]/g, "_");
+    const el = document.querySelector(`#file-${safeMsgId} .file-meta`);
+    if (el) {
+      const fromSpan = [...el.querySelectorAll("span")].find((s) =>
+        s.textContent.startsWith("From:"),
+      );
+      if (fromSpan) fromSpan.textContent = `From: ${sender}`;
     }
   });
 
   // ── Real-time new message listener ──
   window.api.onNewMessage((data) => {
     console.log("[NewMessage]", data);
-    showToast(
-      `New message from ${data.chatName || data.sender}${data.hasMedia ? " (has file)" : ""}`,
-      "info",
-    );
+    // 'album' is a WhatsApp container event that wraps a group of images —
+    // it is not itself a countable message. Skip it (and any no-content
+    // placeholder) to avoid the badge and tracker showing N+1.
+    const isContainer = data.type === "album" || (!data.hasMedia && !data.body);
 
-    // Auto-refresh the chat list to show the new message
-    refreshChats();
+    if (!isContainer) {
+      showToast(
+        `New message from ${data.chatName || data.sender}${data.hasMedia ? " (has file)" : ""}`,
+        "info",
+      );
+    }
 
-    // If we're currently viewing this chat, reload its files
+    // Track this message's ID so we can tag it as unread later,
+    // regardless of what chat.unreadCount says in whatsapp-web.js.
+    // Only track real messages, not container/album events.
+    if (data.messageId && !isContainer) {
+      if (!pendingUnreadIds.has(data.chatId)) {
+        pendingUnreadIds.set(data.chatId, new Set());
+      }
+      pendingUnreadIds.get(data.chatId).add(data.messageId);
+    }
+
+    // Optimistically update the chat item in the DOM immediately, without
+    // waiting for a getChats() round-trip (which may return stale data).
+    // Pass isContainer so the badge is not bumped for album wrapper events.
+    optimisticChatUpdate(data, isContainer);
+
+    // Debounced follow-up refresh: resets on every new message so only one
+    // refresh fires 2s after the last message in a burst (e.g. 8 files).
+    if (newMessageRefreshTimer) clearTimeout(newMessageRefreshTimer);
+    newMessageRefreshTimer = setTimeout(() => {
+      newMessageRefreshTimer = null;
+      refreshChats();
+    }, 2000);
+
+    // If we're currently viewing this chat, debounce file list reload so
+    // a burst of messages (e.g. 8 images) triggers only one reload after
+    // all messages have arrived and whatsapp-web.js has synced.
     if (currentChatId === data.chatId && data.hasMedia) {
-      selectChat(data.chatId, data.chatName || data.sender);
+      if (newMessageFileReloadTimer) clearTimeout(newMessageFileReloadTimer);
+      newMessageFileReloadTimer = setTimeout(() => {
+        newMessageFileReloadTimer = null;
+        selectChat(data.chatId, data.chatName || data.sender);
+      }, 2000);
     }
   });
+}
 
-  // ── Chat list updated (covers all chat/contact changes) ──
-  window.api.onChatsUpdated(() => {
-    console.log("[ChatsUpdated] Refreshing chat list");
+// ── Optimistic Chat Update ───────────────────────────────────────────────
+// Immediately updates the chat list DOM when a new message arrives, using
+// the data already present in the IPC payload — no getChats() round-trip.
+function optimisticChatUpdate(data, isContainer = false) {
+  const chatList = document.getElementById("chat-list");
+  if (!chatList) return;
+
+  const existing = chatList.querySelector(
+    `.chat-item[data-chat-id="${CSS.escape(data.chatId)}"]`,
+  );
+
+  if (existing) {
+    // Update last message preview (only for real messages, not containers)
+    if (!isContainer) {
+      const lastMsgEl = existing.querySelector(".chat-last-msg");
+      const preview = data.hasMedia
+        ? `📎 ${data.fileName || data.type || "File"}`
+        : data.body || "";
+      if (lastMsgEl) {
+        lastMsgEl.textContent = preview;
+      } else if (preview) {
+        const chatInfo = existing.querySelector(".chat-info");
+        if (chatInfo) {
+          const div = document.createElement("div");
+          div.className = "chat-last-msg";
+          div.textContent = preview;
+          chatInfo.appendChild(div);
+        }
+      }
+    }
+
+    // Bump the unread badge only for real messages, not container events
+    if (!isContainer) {
+      let badge = existing.querySelector(".badge-unread");
+      if (badge) {
+        const current = parseInt(badge.textContent, 10) || 0;
+        badge.textContent = current + 1;
+      } else {
+        badge = document.createElement("span");
+        badge.className = "badge badge-unread";
+        badge.textContent = "1";
+        existing.appendChild(badge);
+      }
+    }
+
+    // Move this chat to the top of the list
+    chatList.prepend(existing);
+  } else if (!isContainer) {
+    // Chat not currently in the list — do a full refresh to add it
     refreshChats();
-  });
+  }
 }
 
 // ── Screen Switching ─────────────────────────────────────────────────────
@@ -441,9 +771,14 @@ async function recheckLicense() {
   await validateLicense();
 }
 
+async function restartApplication() {
+  showToast("Restarting application...", "info");
+  await window.api.restartApp();
+}
+
 async function licenseLogout() {
-  showToast("Logging out...", "info");
-  await window.api.logoutWhatsApp();
+  showToast("Logging out and restarting...", "info");
+  await window.api.logoutAndRestart();
 }
 
 function switchToMainScreen() {
@@ -724,9 +1059,14 @@ async function refreshChats() {
       const initials = getInitials(chat.name);
       const avatarContent = initials; // profile pic loaded lazily
       const isActive = currentChatId === chat.id ? "active" : "";
+      // Use the higher of server unreadCount and client-tracked pending IDs
+      const trackedCount = pendingUnreadIds.has(chat.id)
+        ? pendingUnreadIds.get(chat.id).size
+        : 0;
+      const effectiveUnread = Math.max(chat.unreadCount || 0, trackedCount);
       const unreadBadge =
-        chat.unreadCount > 0
-          ? `<span class="badge badge-unread">${chat.unreadCount}</span>`
+        effectiveUnread > 0
+          ? `<span class="badge badge-unread">${effectiveUnread}</span>`
           : "";
       const lastMsg = chat.lastMessage
         ? `<div class="chat-last-msg">${escapeHtml(chat.lastMessage)}</div>`
@@ -763,7 +1103,7 @@ async function refreshChats() {
 async function selectChat(chatId, chatName) {
   currentChatId = chatId;
   selectedFiles.clear();
-  updatePrintButton();
+  updateSelectionUI();
 
   // Clear file search
   const fileSearch = document.getElementById("file-search");
@@ -791,43 +1131,89 @@ async function selectChat(chatId, chatName) {
     </div>
   `;
 
-  const result = await window.api.getChatFiles(chatId);
+  // Pass client-tracked unread message IDs so the backend can tag them
+  // correctly even if chat.unreadCount is stale or was reset.
+  const trackedIds = pendingUnreadIds.has(chatId)
+    ? [...pendingUnreadIds.get(chatId)]
+    : [];
+  const _selectT0 = Date.now();
+  console.log(`[selectChat] invoking getChatFiles for ${chatId}`);
+  const result = await window.api.getChatFiles(chatId, trackedIds);
+  console.log(
+    `[selectChat] getChatFiles resolved in ${Date.now() - _selectT0}ms — unread: ${result.files?.length ?? 0}, hasOlderFiles: ${result.hasOlderFiles}`,
+  );
 
   if (result.error) {
     fileList.innerHTML = `<div class="empty-state"><p>Error: ${result.error}</p></div>`;
     return;
   }
 
-  currentFiles = result.files || [];
-  document.getElementById("file-count").textContent =
-    `${currentFiles.length} file${currentFiles.length !== 1 ? "s" : ""}`;
+  const unreadFiles = result.files || [];
+  const hasOlderFiles = result.hasOlderFiles || false;
 
-  if (currentFiles.length === 0) {
+  currentFiles = [...unreadFiles];
+
+  // Handle case where no unread files AND no older files expected
+  if (unreadFiles.length === 0 && !hasOlderFiles) {
     fileList.innerHTML = `
       <div class="empty-state">
         <p>No media files found in this chat</p>
       </div>
     `;
+    document.getElementById("file-count").textContent = "0 files";
     return;
   }
 
-  // Auto-select all unread files that are already downloaded
-  const unreadDownloaded = currentFiles.filter(
+  // Auto-select all unread files that are already downloaded BEFORE rendering
+  // so the checkboxes and "selected" class are correct in the initial HTML.
+  const unreadDownloaded = unreadFiles.filter(
     (f) => f.isUnread && f.isDownloaded,
   );
   if (unreadDownloaded.length > 0) {
     unreadDownloaded.forEach((f) => selectedFiles.add(f.messageId));
+  }
+
+  // Build initial HTML: unread files first, then loading indicator if older files coming
+  let html = "";
+
+  if (unreadFiles.length > 0) {
+    html += `<div class="file-section-header new-section">
+      <span class="section-icon">🔔</span>
+      <span>New Files (<span class="new-count">${unreadFiles.length}</span>)</span>
+    </div>`;
+    // Wrap in an isolated container so batch-appended files don't bleed
+    // date-separator keys from this section into the "Previously Seen" section.
+    html += `<div class="new-section-files">${renderFilesGroupedByDate(unreadFiles)}</div>`;
+  }
+
+  if (hasOlderFiles) {
+    html += `<div class="older-files-loading">
+      <div class="spinner" style="width:20px;height:20px;border-width:2px"></div>
+      <span style="margin-left:8px;color:var(--text-secondary)">Loading older files...</span>
+    </div>`;
+  }
+
+  fileList.innerHTML = html;
+  attachFileEventListeners(fileList);
+
+  document.getElementById("file-count").textContent =
+    `${currentFiles.length} file${currentFiles.length !== 1 ? "s" : ""}`;
+
+  if (unreadDownloaded.length > 0) {
     showToast(
       `Auto-selected ${unreadDownloaded.length} new file(s). Unselect any you don't need.`,
       "info",
     );
   }
 
-  renderFiles();
-  updatePrintButton();
+  updateSelectionUI();
+  loadDocumentThumbnails();
 
   // Mark chat as read AFTER loading files (so unread tagging is accurate)
   window.api.markChatRead(chatId);
+
+  // Clear client-tracked unread IDs now that files have been loaded & displayed
+  pendingUnreadIds.delete(chatId);
 
   // Remove unread badge from sidebar
   const chatItem = document.querySelector(
@@ -870,12 +1256,45 @@ function renderFileItem(file) {
         ${
           file.isDownloaded
             ? `<button class="btn-file-action" data-action="open-file" data-path="${escapeHtml(file.localPath)}">Open</button>
-             <button class="btn-file-action print" data-action="print-file" data-path="${escapeHtml(file.localPath)}">🖨️ Print</button>`
+             `
             : `<button class="btn-file-action download" data-action="download-file" data-msg-id="${escapeHtml(file.messageId)}" data-filename="${escapeHtml(file.fileName)}">⬇️ Download</button>`
         }
       </div>
     </div>
   `;
+}
+
+// Attach action + click-to-select listeners to file items within a container.
+// Safe to call multiple times — uses event delegation markers to avoid duplication.
+function attachFileEventListeners(container) {
+  container.querySelectorAll("[data-action]").forEach((el) => {
+    if (el.dataset.listenerAttached) return;
+    el.dataset.listenerAttached = "1";
+    if (el.tagName === "INPUT") {
+      el.addEventListener("change", handleFileAction);
+    } else {
+      el.addEventListener("click", handleFileAction);
+    }
+  });
+
+  container.querySelectorAll(".file-item").forEach((el) => {
+    if (el.dataset.clickAttached) return;
+    el.dataset.clickAttached = "1";
+    el.addEventListener("click", (e) => {
+      if (
+        e.target.closest(".file-actions") ||
+        e.target.closest(".file-checkbox")
+      )
+        return;
+      const msgId = el.dataset.messageId;
+      const file = currentFiles.find((f) => f.messageId === msgId);
+      if (file && file.isDownloaded) {
+        toggleFileSelect(msgId);
+        const checkbox = el.querySelector(".file-checkbox");
+        if (checkbox) checkbox.checked = selectedFiles.has(msgId);
+      }
+    });
+  });
 }
 
 function renderFiles() {
@@ -886,58 +1305,26 @@ function renderFiles() {
 
   let html = "";
 
-  // New (unread) files section
   if (unreadFiles.length > 0) {
-    html += `<div class="file-section-header new-section">
-      <span class="section-icon">🔔</span>
-      <span>New Files (${unreadFiles.length})</span>
-    </div>`;
-    html += renderFilesGroupedByDate(unreadFiles);
+    html += `<div class="file-section-header new-section">`;
+    html += `<span class="section-icon">🔔</span>`;
+    html += `<span>New Files (<span class="new-count">${unreadFiles.length}</span>)</span>`;
+    html += `</div>`;
+    html += `<div class="new-section-files">${renderFilesGroupedByDate(unreadFiles)}</div>`;
   }
 
-  // Previously seen files section
   if (seenFiles.length > 0) {
     if (unreadFiles.length > 0) {
-      html += `<div class="file-section-header seen-section">
-        <span class="section-icon">📂</span>
-        <span>Previously Seen (${seenFiles.length})</span>
-      </div>`;
+      html += `<div class="file-section-header seen-section">`;
+      html += `<span class="section-icon">📂</span>`;
+      html += `<span>Previously Seen (<span class="seen-count">${seenFiles.length}</span>)</span>`;
+      html += `</div>`;
     }
-    html += renderFilesGroupedByDate(seenFiles);
+    html += `<div class="seen-section-files">${renderFilesGroupedByDate(seenFiles)}</div>`;
   }
 
   fileList.innerHTML = html;
-
-  // Attach event listeners via delegation on buttons
-  fileList.querySelectorAll("[data-action]").forEach((el) => {
-    if (el.tagName === "INPUT") {
-      el.addEventListener("change", handleFileAction);
-    } else {
-      el.addEventListener("click", handleFileAction);
-    }
-  });
-
-  // Click anywhere on card to toggle selection
-  fileList.querySelectorAll(".file-item").forEach((el) => {
-    el.addEventListener("click", (e) => {
-      // Don't toggle if clicking on action buttons or checkbox
-      if (
-        e.target.closest(".file-actions") ||
-        e.target.closest(".file-checkbox")
-      )
-        return;
-
-      const msgId = el.dataset.messageId;
-      const file = currentFiles.find((f) => f.messageId === msgId);
-      if (file && file.isDownloaded) {
-        toggleFileSelect(msgId);
-        const checkbox = el.querySelector(".file-checkbox");
-        if (checkbox) checkbox.checked = selectedFiles.has(msgId);
-      }
-    });
-  });
-
-  // Load document thumbnails asynchronously
+  attachFileEventListeners(fileList);
   loadDocumentThumbnails();
 }
 
@@ -951,9 +1338,6 @@ function handleFileAction(e) {
       break;
     case "open-file":
       openFile(el.dataset.path);
-      break;
-    case "print-file":
-      printSingleFile(el.dataset.path);
       break;
     case "download-file":
       downloadSingleFile(el.dataset.msgId, el.dataset.filename);
@@ -994,7 +1378,48 @@ async function loadDocumentThumbnails() {
 }
 
 // ── File Selection ───────────────────────────────────────────────────────
+function getFileType(fileName) {
+  if (!fileName) return "unknown";
+  const ext = fileName.split(".").pop().toLowerCase();
+  const imageExts = ["jpg", "jpeg", "png", "bmp", "gif", "tiff", "tif", "webp"];
+  if (ext === "pdf") return "pdf";
+  if (imageExts.includes(ext)) return "image";
+  return ext;
+}
+
 function toggleFileSelect(messageId) {
+  const fileToSelect = currentFiles.find((f) => f.messageId === messageId);
+  if (!fileToSelect) return;
+
+  if (!selectedFiles.has(messageId)) {
+    // We are adding. Check if it matches existing selection types.
+    if (selectedFiles.size > 0) {
+      const firstSelectedId = Array.from(selectedFiles)[0];
+      const firstFile = currentFiles.find(
+        (f) => f.messageId === firstSelectedId,
+      );
+      if (firstFile) {
+        const firstType = getFileType(firstFile.fileName);
+        const currentType = getFileType(fileToSelect.fileName);
+        if (firstType !== currentType) {
+          showToast(
+            `Please select only files of the same type (${firstType.toUpperCase()})`,
+            "warning",
+          );
+          // Revert checkbox if it was toggled
+          const el = document.getElementById(
+            `file-${messageId.replace(/[^a-zA-Z0-9]/g, "_")}`,
+          );
+          if (el) {
+            const checkbox = el.querySelector(".file-checkbox");
+            if (checkbox) checkbox.checked = false;
+          }
+          return;
+        }
+      }
+    }
+  }
+
   if (selectedFiles.has(messageId)) {
     selectedFiles.delete(messageId);
   } else {
@@ -1007,49 +1432,10 @@ function toggleFileSelect(messageId) {
   );
   if (el) el.classList.toggle("selected", selectedFiles.has(messageId));
 
-  updatePrintButton();
+  updateSelectionUI();
 }
 
-function toggleSelectAll() {
-  const btn = document.getElementById("btn-select-all");
-  const downloadedFiles = currentFiles.filter((f) => f.isDownloaded);
-  const allCurrentlySelected =
-    downloadedFiles.length > 0 &&
-    downloadedFiles.every((f) => selectedFiles.has(f.messageId));
-
-  if (allCurrentlySelected) {
-    // Deselect all
-    selectedFiles.clear();
-  } else {
-    // Select all downloaded files
-    downloadedFiles.forEach((f) => {
-      selectedFiles.add(f.messageId);
-    });
-  }
-
-  renderFiles();
-  updateSelectAllButton();
-  updatePrintButton();
-}
-
-function updateSelectAllButton() {
-  const btn = document.getElementById("btn-select-all");
-  if (!btn) return;
-  const downloadedFiles = currentFiles.filter((f) => f.isDownloaded);
-  const allCurrentlySelected =
-    downloadedFiles.length > 0 &&
-    downloadedFiles.every((f) => selectedFiles.has(f.messageId));
-  btn.textContent = allCurrentlySelected ? "Deselect All" : "Select All";
-}
-
-function updatePrintButton() {
-  const btn = document.getElementById("btn-print-selected");
-  btn.disabled = selectedFiles.size === 0;
-  btn.innerHTML = `
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-    Print Selected (${selectedFiles.size})
-  `;
-
+function updateSelectionUI() {
   // Update floating delete FAB
   const fab = document.getElementById("fab-delete");
   if (fab) {
@@ -1062,7 +1448,62 @@ function updatePrintButton() {
     }
   }
 
-  updateSelectAllButton();
+  // Show unselect button only when files are selected
+  const btnUnselectAll = document.getElementById("btn-unselect-all");
+  if (btnUnselectAll) {
+    btnUnselectAll.classList.toggle("hidden", selectedFiles.size === 0);
+  }
+}
+
+function unselectAllFiles() {
+  if (selectedFiles.size === 0) return;
+  selectedFiles.clear();
+  renderFiles();
+  updateSelectionUI();
+}
+
+// ── Open Selected ────────────────────────────────────────────────────────
+async function openSelected() {
+  if (selectedFiles.size === 0) {
+    showToast("No downloaded files selected", "warning");
+    return;
+  }
+
+  const filePaths = [];
+  const selectedTypes = new Set();
+  let allImages = true;
+
+  selectedFiles.forEach((msgId) => {
+    const file = currentFiles.find((f) => f.messageId === msgId);
+    if (file && file.localPath) {
+      filePaths.push(file.localPath);
+      const fType = getFileType(file.fileName);
+      selectedTypes.add(fType);
+      if (fType !== "image") {
+        allImages = false;
+      }
+    }
+  });
+
+  if (filePaths.length === 0) {
+    showToast("No downloaded files selected to open", "warning");
+    return;
+  }
+
+  if (selectedTypes.size > 1) {
+    showToast("Only files of one type can be opened", "warning");
+    return;
+  }
+
+  if (allImages) {
+    // Send directly to Windows Print Pictures dialog
+    window.api.openPrintPictures(filePaths);
+  } else {
+    // Standard open for non-image or mixed batches
+    for (const filePath of filePaths) {
+      openFile(filePath);
+    }
+  }
 }
 
 // ── Download ─────────────────────────────────────────────────────────────
@@ -1144,7 +1585,7 @@ async function deleteSelected() {
       `${currentFiles.length} file${currentFiles.length !== 1 ? "s" : ""}`;
 
     renderFiles();
-    updatePrintButton();
+    updateSelectionUI();
 
     let msg = `Deleted ${successCount} file(s) from disk`;
     if (waSuccess > 0) msg += `, ${waSuccess} from WhatsApp`;
@@ -1171,65 +1612,6 @@ function closeChat() {
   // Show "no chat selected" state
   document.getElementById("files-section").classList.add("hidden");
   document.getElementById("no-chat-selected").classList.remove("hidden");
-}
-
-// ── Printing ─────────────────────────────────────────────────────────────
-async function printSelected() {
-  if (selectedFiles.size === 0) return;
-
-  const filePaths = [];
-  selectedFiles.forEach((msgId) => {
-    const file = currentFiles.find((f) => f.messageId === msgId);
-    if (file && file.localPath) filePaths.push(file.localPath);
-  });
-
-  if (filePaths.length === 0) {
-    showToast("No downloaded files selected for printing", "warning");
-    return;
-  }
-
-  const printerName = document.getElementById("printer-select").value;
-
-  showToast(`Opening printer setup for ${filePaths.length} file(s)...`, "info");
-
-  const result = await window.api.printWithSetup({ filePaths, printerName });
-
-  if (result.error) {
-    showToast(`Print error: ${result.error}`, "error");
-    return;
-  }
-
-  if (result.results) {
-    const success = result.results.filter((r) => r.success).length;
-    const fail = result.results.filter((r) => r.error).length;
-    showToast(
-      `Printed ${success} file(s)${fail > 0 ? `, ${fail} failed` : ""}`,
-      fail > 0 ? "warning" : "success",
-    );
-  }
-}
-
-async function printSingleFile(filePath) {
-  const printerName = document.getElementById("printer-select").value;
-  showToast("Opening printer setup...", "info");
-
-  const result = await window.api.printWithSetup({
-    filePaths: [filePath],
-    printerName,
-  });
-
-  if (result.error) {
-    showToast(`Print error: ${result.error}`, "error");
-    return;
-  }
-
-  if (result.results && result.results[0]) {
-    if (result.results[0].success) {
-      showToast("File sent to printer!", "success");
-    } else {
-      showToast(`Print error: ${result.results[0].error}`, "error");
-    }
-  }
 }
 
 // ── Printers ─────────────────────────────────────────────────────────────
@@ -1434,10 +1816,9 @@ async function logoutWhatsApp() {
   const dropdown = document.getElementById("profile-dropdown");
   dropdown.classList.add("hidden");
 
-  showToast("Logging out...", "info");
+  showToast("Logging out and restarting...", "info");
   stopAutoRefresh();
-
-  await window.api.logoutWhatsApp();
+  await window.api.logoutAndRestart();
 }
 
 async function checkForUpdates() {
@@ -1464,19 +1845,26 @@ function switchToLoginScreen() {
   currentFiles = [];
   selectedFiles.clear();
   allSelected = false;
+  pendingUnreadIds.clear();
+  if (newMessageRefreshTimer) {
+    clearTimeout(newMessageRefreshTimer);
+    newMessageRefreshTimer = null;
+  }
+  if (newMessageFileReloadTimer) {
+    clearTimeout(newMessageFileReloadTimer);
+    newMessageFileReloadTimer = null;
+  }
   stopAutoRefresh();
 
-  // Clear profile pic cache so stale pics from a previous account don't show
-  for (const key of Object.keys(profilePicCache)) {
-    delete profilePicCache[key];
-  }
-
-  // Reset sync retry state
-  chatSyncRetryCount = 0;
-  if (syncRetryTimer) {
-    clearTimeout(syncRetryTimer);
-    syncRetryTimer = null;
-  }
+  // Clear chat list so old account's chats don't show for the new account
+  const oldChatList = document.getElementById("chat-list");
+  if (oldChatList) oldChatList.innerHTML = "";
+  const oldFileList = document.getElementById("file-list");
+  if (oldFileList) oldFileList.innerHTML = "";
+  const noChatSel = document.getElementById("no-chat-selected");
+  if (noChatSel) noChatSel.classList.remove("hidden");
+  const filesSection = document.getElementById("files-section");
+  if (filesSection) filesSection.classList.add("hidden");
 
   // Switch screens
   document.getElementById("main-screen").classList.remove("active");
@@ -1488,10 +1876,10 @@ function switchToLoginScreen() {
   const qrContainer = document.getElementById("qr-container");
   qrContainer.innerHTML = `
     <div class="spinner"></div>
-    <p id="qr-status">Initializing WhatsApp connection...</p>
+    <p id="qr-status">Waiting for browser to start...</p>
     <img id="qr-image" class="qr-image hidden" alt="QR Code" />
   `;
-
+  startInitTimer();
   // Reset loading bar
   const loadingContainer = document.getElementById("loading-bar-container");
   if (loadingContainer) loadingContainer.classList.add("hidden");
@@ -1509,6 +1897,48 @@ function switchToLoginScreen() {
 }
 
 // ── UI Helpers ───────────────────────────────────────────────────────────
+
+// ── Init timer: shows elapsed seconds while waiting for QR code ──────────
+let _initTimerInterval = null;
+let _initTimerStart = 0;
+
+function setQrStatus(text) {
+  const el = document.getElementById("qr-status");
+  if (el) el.textContent = text;
+}
+
+function startInitTimer() {
+  stopInitTimer();
+  _initTimerStart = Date.now();
+  _initTimerInterval = setInterval(() => {
+    const secs = Math.floor((Date.now() - _initTimerStart) / 1000);
+    const el = document.getElementById("qr-status");
+    if (!el) return;
+    // Only update while spinner is showing (QR not yet displayed)
+    const qrImg = document.getElementById("qr-image");
+    if (qrImg && !qrImg.classList.contains("hidden")) {
+      stopInitTimer();
+      return;
+    }
+    // Keep the current base message but append elapsed time
+    const base = el.dataset.base || el.textContent.replace(/ \(\d+s\)$/, "");
+    el.dataset.base = base;
+    el.textContent = `${base} (${secs}s)`;
+  }, 1000);
+}
+
+function stopInitTimer() {
+  if (_initTimerInterval) {
+    clearInterval(_initTimerInterval);
+    _initTimerInterval = null;
+  }
+  // Strip elapsed time suffix from status text
+  const el = document.getElementById("qr-status");
+  if (el && el.dataset.base) {
+    el.textContent = el.dataset.base;
+    delete el.dataset.base;
+  }
+}
 function updateFileStatus(messageId, status) {
   const safeMsgId = messageId.replace(/[^a-zA-Z0-9]/g, "_");
   const el = document.getElementById(`file-${safeMsgId}`);
@@ -1664,12 +2094,50 @@ function renderFilesGroupedByDate(files) {
   }
 
   let html = "";
-  for (const [, groupFiles] of groups) {
+  for (const [key, groupFiles] of groups) {
     const label = formatDateLabel(groupFiles[0].timestamp);
-    html += `<div class="date-separator"><span class="date-separator-label">${escapeHtml(label)}</span></div>`;
+    html += `<div class="date-separator" data-date-key="${escapeHtml(key)}"><span class="date-separator-label">${escapeHtml(label)}</span></div>`;
     html += groupFiles.map(renderFileItem).join("");
   }
   return html;
+}
+
+// Append files into a container, merging into existing date-separator groups
+// instead of creating duplicate separators for the same day.
+function appendFilesGrouped(files, container, beforeEl) {
+  // Group incoming files by date key
+  const groups = new Map();
+  for (const file of files) {
+    const key = getDateKey(file.timestamp);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(file);
+  }
+
+  for (const [key, groupFiles] of groups) {
+    const label = formatDateLabel(groupFiles[0].timestamp);
+    const filesHtml = groupFiles.map(renderFileItem).join("");
+    const existingSep = container.querySelector(
+      `.date-separator[data-date-key="${CSS.escape(key)}"]`,
+    );
+    if (existingSep) {
+      // Find the last file-item that belongs to this separator
+      // (every sibling .file-item or .date-separator until the next separator)
+      let insertAfter = existingSep;
+      let sibling = existingSep.nextElementSibling;
+      while (sibling && !sibling.classList.contains("date-separator")) {
+        if (sibling.classList.contains("file-item")) insertAfter = sibling;
+        sibling = sibling.nextElementSibling;
+      }
+      insertAfter.insertAdjacentHTML("afterend", filesHtml);
+    } else {
+      const html = `<div class="date-separator" data-date-key="${escapeHtml(key)}"><span class="date-separator-label">${escapeHtml(label)}</span></div>${filesHtml}`;
+      if (beforeEl) {
+        beforeEl.insertAdjacentHTML("beforebegin", html);
+      } else {
+        container.insertAdjacentHTML("beforeend", html);
+      }
+    }
+  }
 }
 
 function formatTime(timestamp) {
