@@ -280,7 +280,11 @@ async function launchWithCommandTemplate(commandTemplate, filePaths) {
 
   if (!hasSinglePlaceholder && !hasMultiPlaceholder) {
     finalArgsText = `${finalArgsText} ${quotedFileArgs.join(" ")}`.trim();
-  } else if (hasSinglePlaceholder && !hasMultiPlaceholder && remainingFileArgs.length > 0) {
+  } else if (
+    hasSinglePlaceholder &&
+    !hasMultiPlaceholder &&
+    remainingFileArgs.length > 0
+  ) {
     finalArgsText = `${finalArgsText} ${remainingFileArgs.join(" ")}`.trim();
   }
 
@@ -1775,7 +1779,10 @@ ipcMain.handle("open-files-with-app", async (event, payload) => {
       await launchWithCommandTemplate(commandTemplate, existingFilePaths);
       return {
         success: true,
-        results: existingFilePaths.map((filePath) => ({ filePath, success: true })),
+        results: existingFilePaths.map((filePath) => ({
+          filePath,
+          success: true,
+        })),
       };
     } catch (error) {
       return {
