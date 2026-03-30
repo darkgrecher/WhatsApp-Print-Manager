@@ -62,6 +62,73 @@ function normalizeJsonArray(jsonText) {
   return Array.isArray(parsed) ? parsed : [parsed];
 }
 
+const IMAGE_EXTENSIONS = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".bmp",
+  ".gif",
+  ".tiff",
+  ".tif",
+  ".webp",
+]);
+
+function isImageFilePath(filePath) {
+  return IMAGE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+async function openPrintPicturesDialog(filePaths) {
+  try {
+    if (process.platform !== "win32") {
+      for (const fp of filePaths) require("electron").shell.openPath(fp);
+      return { success: true };
+    }
+
+    const os = require("os");
+    const path = require("path");
+    const { exec } = require("child_process");
+    const batchId = Date.now().toString();
+    const tempDir = path.join(
+      os.tmpdir(),
+      "WhatsappPrintManager_Batch_" + batchId,
+    );
+    const fsSync = require("fs");
+    fsSync.mkdirSync(tempDir, { recursive: true });
+
+    for (const fp of filePaths) {
+      if (fsSync.existsSync(fp)) {
+        const dest = path.join(tempDir, path.basename(fp));
+        fsSync.copyFileSync(fp, dest);
+      }
+    }
+
+    const psScriptPath = path.join(tempDir, "print.ps1");
+    const psScriptContent = `$ErrorActionPreference = 'SilentlyContinue'
+  $shell = New-Object -ComObject Shell.Application
+  $folder = $shell.Namespace('${tempDir}')
+  if ($folder) {
+    $items = $folder.Items()
+    if ($items.Count -gt 0) {
+      $items.InvokeVerbEx('Print')
+      Start-Sleep -Seconds 300
+    }
+  }`;
+    fsSync.writeFileSync(psScriptPath, psScriptContent, "utf8");
+
+    exec(
+      `powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File "${psScriptPath}"`,
+      (err) => {
+        if (err) console.error("Print Pictures background loop error:", err);
+      },
+    );
+
+    return { success: true };
+  } catch (err) {
+    console.error("open-print-pictures error:", err);
+    return { error: err.message };
+  }
+}
+
 async function listOpenWithApps(filePath) {
   if (process.platform !== "win32") {
     return [{ id: "__default__", name: "Default application" }];
@@ -71,6 +138,7 @@ async function listOpenWithApps(filePath) {
   if (!ext) {
     return [{ id: "__default__", name: "Default application" }];
   }
+  const isImage = IMAGE_EXTENSIONS.has(ext);
 
   const ps = [
     "$ErrorActionPreference='Stop'",
@@ -136,11 +204,18 @@ async function listOpenWithApps(filePath) {
       command: String(x.command),
     }));
 
-  return [
+  const builtIns = [
     { id: "__default__", name: "Default application" },
     { id: "__windows_open_with__", name: "Choose app in Windows..." },
-    ...resolved,
   ];
+  if (isImage) {
+    builtIns.splice(1, 0, {
+      id: "__print_pictures__",
+      name: "Print Pictures dialog",
+    });
+  }
+
+  return [...builtIns, ...resolved];
 }
 
 async function launchWithCommandTemplate(commandTemplate, filePath) {
@@ -1638,12 +1713,20 @@ ipcMain.handle("open-files-with-app", async (event, payload) => {
     const appId = body.appId;
     const filePaths = Array.isArray(body.filePaths) ? body.filePaths : [];
     const existingFilePaths = filePaths.filter((fp) => fp && fs.existsSync(fp));
+    const allImages = existingFilePaths.every((fp) => isImageFilePath(fp));
 
     if (!existingFilePaths.length) {
       return { error: "No valid files selected" };
     }
 
+    if (appId === "__print_pictures__") {
+      return await openPrintPicturesDialog(existingFilePaths);
+    }
+
     if (!appId || appId === "__default__") {
+      if (allImages) {
+        return await openPrintPicturesDialog(existingFilePaths);
+      }
       for (const filePath of existingFilePaths) {
         await shell.openPath(filePath);
       }
@@ -1690,58 +1773,7 @@ ipcMain.handle("open-files-with-app", async (event, payload) => {
 
 // Open multiple images in the Windows "Print Pictures" dialog
 ipcMain.handle("open-print-pictures", async (event, filePaths) => {
-  try {
-    if (process.platform !== "win32") {
-      for (const fp of filePaths) require("electron").shell.openPath(fp);
-      return { success: true };
-    }
-    const os = require("os");
-    const path = require("path");
-    const { exec } = require("child_process");
-    const batchId = Date.now().toString();
-    const tempDir = path.join(
-      os.tmpdir(),
-      "WhatsappPrintManager_Batch_" + batchId,
-    );
-    const fsSync = require("fs");
-    fsSync.mkdirSync(tempDir, { recursive: true });
-
-    for (const fp of filePaths) {
-      if (fsSync.existsSync(fp)) {
-        const dest = path.join(tempDir, path.basename(fp));
-        fsSync.copyFileSync(fp, dest);
-      }
-    }
-
-    const psScriptPath = path.join(tempDir, "print.ps1");
-    // Keep the COM host alive long enough for the system print dialog to stay stable.
-    // Avoid matching a localized window title ("Print Pictures"), which fails on
-    // non-English Windows and can close the dialog a few seconds after opening.
-    const psScriptContent = `$ErrorActionPreference = 'SilentlyContinue'
-  $shell = New-Object -ComObject Shell.Application
-  $folder = $shell.Namespace('${tempDir}')
-  if ($folder) {
-    $items = $folder.Items()
-    if ($items.Count -gt 0) {
-      $items.InvokeVerbEx('Print')
-      Start-Sleep -Seconds 300
-    }
-  }`;
-    fsSync.writeFileSync(psScriptPath, psScriptContent, "utf8");
-
-    // Execute script invisibly, won't block electron UI
-    exec(
-      `powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File "${psScriptPath}"`,
-      (err) => {
-        if (err) console.error("Print Pictures background loop error:", err);
-      },
-    );
-
-    return { success: true };
-  } catch (err) {
-    console.error("open-print-pictures error:", err);
-    return { error: err.message };
-  }
+  return await openPrintPicturesDialog(filePaths);
 });
 
 // Delete downloaded files + optionally delete from WhatsApp chat

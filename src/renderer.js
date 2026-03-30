@@ -1477,6 +1477,22 @@ function hideOpenWithDropdown() {
   if (dropdown) dropdown.classList.add("hidden");
 }
 
+function getDefaultOpenWithApp(apps, isImageType) {
+  if (isImageType) {
+    const printPicturesApp = apps.find((app) => app.id === "__print_pictures__");
+    if (printPicturesApp) {
+      return { id: printPicturesApp.id, name: printPicturesApp.name };
+    }
+  }
+
+  const defaultApp = apps.find((app) => app.id === "__default__");
+  if (defaultApp) {
+    return { id: defaultApp.id, name: defaultApp.name };
+  }
+
+  return { id: "__default__", name: "Default application" };
+}
+
 function renderOpenWithDropdown(apps) {
   const dropdown = document.getElementById("open-with-dropdown");
   if (!dropdown) return;
@@ -1542,11 +1558,16 @@ async function toggleOpenWithDropdown(event) {
     return;
   }
 
+  const isImageType =
+    selectedTypes.size === 1 && selectedTypes.has("image");
+
+  if (isImageType && selectedOpenWithApp.id === "__default__") {
+    selectedOpenWithApp = getDefaultOpenWithApp(apps, true);
+    updateOpenSelectedButtonLabel();
+  }
+
   if (!apps.some((app) => app.id === selectedOpenWithApp.id)) {
-    selectedOpenWithApp = {
-      id: "__default__",
-      name: "Default application",
-    };
+    selectedOpenWithApp = getDefaultOpenWithApp(apps, isImageType);
     updateOpenSelectedButtonLabel();
   }
 
@@ -1583,9 +1604,16 @@ async function openSelectedWithApp(preferredApp) {
     return;
   }
 
+  const isImageType =
+    selectedTypes.size === 1 && selectedTypes.has("image");
+
   let appToUse = preferredApp || selectedOpenWithApp;
+  if (isImageType && appToUse.id === "__default__") {
+    appToUse = getDefaultOpenWithApp(apps, true);
+  }
+
   if (!apps.some((app) => app.id === appToUse.id)) {
-    appToUse = { id: "__default__", name: "Default application" };
+    appToUse = getDefaultOpenWithApp(apps, isImageType);
     selectedOpenWithApp = appToUse;
     updateOpenSelectedButtonLabel();
   }
