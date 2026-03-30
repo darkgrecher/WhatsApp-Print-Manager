@@ -150,11 +150,16 @@ async function openWithWindowsPhotos(filePaths) {
       } catch (err) {
         try {
           await shell.openPath(fp);
-          results.push({ filePath: fp, success: true, fallback: "default-app" });
+          results.push({
+            filePath: fp,
+            success: true,
+            fallback: "default-app",
+          });
         } catch (fallbackErr) {
           results.push({
             filePath: fp,
-            error: fallbackErr.message || err.message || "Failed to open in Photos",
+            error:
+              fallbackErr.message || err.message || "Failed to open in Photos",
           });
         }
       }
