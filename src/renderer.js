@@ -10,6 +10,10 @@ let isRefreshing = false; // guard against re-entrant refresh
 let showAllChats = false; // toggle between "recent/unread" and "all chats"
 let newMessageRefreshTimer = null; // debounce timer for post-notification refresh
 let newMessageFileReloadTimer = null; // debounce timer for file list reload
+let selectedOpenWithApp = {
+  id: "__default__",
+  name: "Default application",
+};
 const pendingUnreadIds = new Map(); // chatId → Set<messageId> tracked client-side
 const AUTO_REFRESH_INTERVAL = 10000; // 10 seconds
 
@@ -74,10 +78,15 @@ function setupButtonListeners() {
 
   // Close dropdown when clicking outside
   document.addEventListener("click", (e) => {
-    const dropdown = document.getElementById("profile-dropdown");
-    const section = document.getElementById("profile-section");
-    if (dropdown && section && !section.contains(e.target)) {
-      dropdown.classList.add("hidden");
+    const profileDropdown = document.getElementById("profile-dropdown");
+    const profileSection = document.getElementById("profile-section");
+    if (profileDropdown && profileSection && !profileSection.contains(e.target)) {
+      profileDropdown.classList.add("hidden");
+    }
+
+    const openWithContainer = document.getElementById("open-with-container");
+    if (openWithContainer && !openWithContainer.contains(e.target)) {
+      hideOpenWithDropdown();
     }
   });
 
@@ -89,6 +98,14 @@ function setupButtonListeners() {
   const btnOpenSelected = document.getElementById("btn-open-selected");
   if (btnOpenSelected)
     btnOpenSelected.addEventListener("click", () => openSelected());
+
+  const btnOpenWithMenu = document.getElementById("btn-open-with-menu");
+  if (btnOpenWithMenu)
+    btnOpenWithMenu.addEventListener("click", (event) =>
+      toggleOpenWithDropdown(event),
+    );
+
+  updateOpenSelectedButtonLabel();
 
   const fabDelete = document.getElementById("fab-delete");
   if (fabDelete) fabDelete.addEventListener("click", () => deleteSelected());
@@ -1425,17 +1442,12 @@ function updateSelectionUI() {
 function unselectAllFiles() {
   if (selectedFiles.size === 0) return;
   selectedFiles.clear();
+  hideOpenWithDropdown();
   renderFiles();
   updateSelectionUI();
 }
 
-// ── Open Selected ────────────────────────────────────────────────────────
-async function openSelected() {
-  if (selectedFiles.size === 0) {
-    showToast("No downloaded files selected", "warning");
-    return;
-  }
-
+function getSelectedOpenableFiles() {
   const filePaths = [];
   const selectedTypes = new Set();
 
@@ -1446,6 +1458,104 @@ async function openSelected() {
       selectedTypes.add(getFileType(file.fileName));
     }
   });
+
+  return { filePaths, selectedTypes };
+}
+
+function updateOpenSelectedButtonLabel() {
+  const btnOpenSelected = document.getElementById("btn-open-selected");
+  if (!btnOpenSelected) return;
+  btnOpenSelected.textContent = `Open with ${selectedOpenWithApp.name}`;
+}
+
+function hideOpenWithDropdown() {
+  const dropdown = document.getElementById("open-with-dropdown");
+  if (dropdown) dropdown.classList.add("hidden");
+}
+
+function renderOpenWithDropdown(apps) {
+  const dropdown = document.getElementById("open-with-dropdown");
+  if (!dropdown) return;
+
+  dropdown.innerHTML = "";
+
+  apps.forEach((app) => {
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "open-with-option";
+    if (app.id === selectedOpenWithApp.id) {
+      option.classList.add("active");
+    }
+    option.textContent = app.name;
+    option.addEventListener("click", async () => {
+      selectedOpenWithApp = { id: app.id, name: app.name };
+      updateOpenSelectedButtonLabel();
+      hideOpenWithDropdown();
+      await openSelectedWithApp(selectedOpenWithApp);
+    });
+    dropdown.appendChild(option);
+  });
+
+  dropdown.classList.remove("hidden");
+}
+
+async function toggleOpenWithDropdown(event) {
+  event.stopPropagation();
+
+  const dropdown = document.getElementById("open-with-dropdown");
+  if (!dropdown) return;
+
+  if (!dropdown.classList.contains("hidden")) {
+    hideOpenWithDropdown();
+    return;
+  }
+
+  if (selectedFiles.size === 0) {
+    showToast("Select files first to choose an app", "warning");
+    return;
+  }
+
+  const { filePaths, selectedTypes } = getSelectedOpenableFiles();
+  if (filePaths.length === 0) {
+    showToast("No downloaded files selected to open", "warning");
+    return;
+  }
+
+  if (selectedTypes.size > 1) {
+    showToast("Only files of one type can be opened", "warning");
+    return;
+  }
+
+  const appListResult = await window.api.getOpenWithApps(filePaths[0]);
+  if (appListResult.error) {
+    showToast(`Could not load applications: ${appListResult.error}`, "error");
+    return;
+  }
+
+  const apps = Array.isArray(appListResult.apps) ? appListResult.apps : [];
+  if (apps.length === 0) {
+    showToast("No compatible applications found", "warning");
+    return;
+  }
+
+  if (!apps.some((app) => app.id === selectedOpenWithApp.id)) {
+    selectedOpenWithApp = {
+      id: "__default__",
+      name: "Default application",
+    };
+    updateOpenSelectedButtonLabel();
+  }
+
+  renderOpenWithDropdown(apps);
+}
+
+async function openSelectedWithApp(preferredApp) {
+  if (selectedFiles.size === 0) {
+    showToast("No downloaded files selected", "warning");
+    return;
+  }
+
+  const { filePaths, selectedTypes } = getSelectedOpenableFiles();
 
   if (filePaths.length === 0) {
     showToast("No downloaded files selected to open", "warning");
@@ -1469,14 +1579,18 @@ async function openSelected() {
     return;
   }
 
-  const selectedAppId = await showOpenWithPicker(apps);
-  if (!selectedAppId) {
-    return;
+  let appToUse = preferredApp || selectedOpenWithApp;
+  if (!apps.some((app) => app.id === appToUse.id)) {
+    appToUse = { id: "__default__", name: "Default application" };
+    selectedOpenWithApp = appToUse;
+    updateOpenSelectedButtonLabel();
   }
+
+  hideOpenWithDropdown();
 
   const openResult = await window.api.openFilesWithApp({
     requestId: appListResult.requestId,
-    appId: selectedAppId,
+    appId: appToUse.id,
     filePaths,
   });
 
@@ -1496,6 +1610,11 @@ async function openSelected() {
   } else {
     showToast(`Opened ${filePaths.length} file(s)`, "success");
   }
+}
+
+// ── Open Selected ────────────────────────────────────────────────────────
+async function openSelected() {
+  await openSelectedWithApp(selectedOpenWithApp);
 }
 
 // ── Download ─────────────────────────────────────────────────────────────
@@ -1591,6 +1710,7 @@ function closeChat() {
   currentChatId = null;
   currentFiles = [];
   selectedFiles.clear();
+  hideOpenWithDropdown();
 
   // Hide floating delete button
   const fab = document.getElementById("fab-delete");
@@ -2162,107 +2282,6 @@ function escapeHtml(str) {
 function escapeJs(str) {
   if (!str) return "";
   return str.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-}
-
-function showOpenWithPicker(apps) {
-  return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.style.position = "fixed";
-    overlay.style.inset = "0";
-    overlay.style.background = "rgba(0, 0, 0, 0.35)";
-    overlay.style.display = "flex";
-    overlay.style.alignItems = "center";
-    overlay.style.justifyContent = "center";
-    overlay.style.zIndex = "11000";
-
-    const card = document.createElement("div");
-    card.style.width = "min(520px, 92vw)";
-    card.style.background = "#fff";
-    card.style.borderRadius = "12px";
-    card.style.padding = "18px";
-    card.style.boxShadow = "0 20px 60px rgba(0, 0, 0, 0.25)";
-
-    const title = document.createElement("h3");
-    title.textContent = "Open Selected With";
-    title.style.margin = "0 0 10px 0";
-    title.style.fontSize = "16px";
-
-    const subtitle = document.createElement("p");
-    subtitle.textContent = "Choose an application for this file type.";
-    subtitle.style.margin = "0 0 12px 0";
-    subtitle.style.color = "#667781";
-    subtitle.style.fontSize = "13px";
-
-    const select = document.createElement("select");
-    select.style.width = "100%";
-    select.style.padding = "10px";
-    select.style.border = "1px solid #d1d5db";
-    select.style.borderRadius = "8px";
-    select.style.fontSize = "13px";
-
-    apps.forEach((app) => {
-      const option = document.createElement("option");
-      option.value = app.id;
-      option.textContent = app.name;
-      select.appendChild(option);
-    });
-
-    const actions = document.createElement("div");
-    actions.style.display = "flex";
-    actions.style.justifyContent = "flex-end";
-    actions.style.gap = "8px";
-    actions.style.marginTop = "14px";
-
-    const cancelButton = document.createElement("button");
-    cancelButton.className = "btn btn-small btn-secondary";
-    cancelButton.textContent = "Cancel";
-
-    const openButton = document.createElement("button");
-    openButton.className = "btn btn-small btn-primary";
-    openButton.textContent = "Open";
-
-    actions.appendChild(cancelButton);
-    actions.appendChild(openButton);
-    card.appendChild(title);
-    card.appendChild(subtitle);
-    card.appendChild(select);
-    card.appendChild(actions);
-    overlay.appendChild(card);
-    document.body.appendChild(overlay);
-
-    const cleanup = () => {
-      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-
-    const onKeyDown = (event) => {
-      if (event.key === "Escape") {
-        cleanup();
-        resolve(null);
-      }
-    };
-
-    cancelButton.addEventListener("click", () => {
-      cleanup();
-      resolve(null);
-    });
-
-    openButton.addEventListener("click", () => {
-      const selectedValue = select.value || null;
-      cleanup();
-      resolve(selectedValue);
-    });
-
-    overlay.addEventListener("click", (event) => {
-      if (event.target === overlay) {
-        cleanup();
-        resolve(null);
-      }
-    });
-
-    document.addEventListener("keydown", onKeyDown);
-    select.focus();
-  });
 }
 
 // ── Toast Notifications ──────────────────────────────────────────────────

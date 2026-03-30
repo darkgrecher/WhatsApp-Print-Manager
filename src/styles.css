@@ -626,6 +626,68 @@ body {
   flex-wrap: wrap;
 }
 
+.open-with-container {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#btn-open-selected {
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn-open-with-menu {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.open-with-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 260px;
+  max-width: 340px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--bg-white);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  z-index: 1200;
+  padding: 6px;
+}
+
+.open-with-option {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.open-with-option:hover {
+  background: #f3f4f6;
+}
+
+.open-with-option.active {
+  background: #dcfce7;
+  color: #166534;
+  font-weight: 600;
+}
+
 /* ── File List ───────────────────────────────────────────────────────────── */
 .file-list {
   flex: 1;

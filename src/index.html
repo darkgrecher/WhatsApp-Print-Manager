@@ -331,7 +331,17 @@
                         </div>
                         <div class="files-header-right">
                             <button class="btn btn-small hidden" id="btn-unselect-all">Unselect All</button>
-                            <button class="btn btn-small" id="btn-open-selected">Open Selected</button>
+                            <div class="open-with-container" id="open-with-container">
+                                <button class="btn btn-small" id="btn-open-selected">Open with Default application</button>
+                                <button class="btn btn-small btn-open-with-menu" id="btn-open-with-menu"
+                                    title="Choose application" aria-label="Choose application">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="6 9 12 15 18 9" />
+                                    </svg>
+                                </button>
+                                <div class="open-with-dropdown hidden" id="open-with-dropdown"></div>
+                            </div>
                         </div>
                     </div>
 
