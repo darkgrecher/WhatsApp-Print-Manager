@@ -129,6 +129,43 @@ async function openPrintPicturesDialog(filePaths) {
   }
 }
 
+async function openWithWindowsPhotos(filePaths) {
+  try {
+    if (process.platform !== "win32") {
+      for (const fp of filePaths) {
+        await shell.openPath(fp);
+      }
+      return { success: true };
+    }
+
+    const results = [];
+    for (const fp of filePaths) {
+      try {
+        // Photos is a UWP app without a classic shell\open\command entry.
+        // Use the ms-photos URI and fall back to default shell open.
+        const uri = `ms-photos:viewer?fileName=${encodeURIComponent(fp)}`;
+        const ps = `$ErrorActionPreference='Stop'; Start-Process ${psQuote(uri)}`;
+        await runPowerShell(ps);
+        results.push({ filePath: fp, success: true });
+      } catch (err) {
+        try {
+          await shell.openPath(fp);
+          results.push({ filePath: fp, success: true, fallback: "default-app" });
+        } catch (fallbackErr) {
+          results.push({
+            filePath: fp,
+            error: fallbackErr.message || err.message || "Failed to open in Photos",
+          });
+        }
+      }
+    }
+
+    return { success: results.some((r) => r.success), results };
+  } catch (error) {
+    return { error: error.message || "Failed to open with Windows Photos" };
+  }
+}
+
 async function listOpenWithApps(filePath) {
   if (process.platform !== "win32") {
     return [{ id: "__default__", name: "Default application" }];
@@ -212,6 +249,10 @@ async function listOpenWithApps(filePath) {
     builtIns.splice(1, 0, {
       id: "__print_pictures__",
       name: "Print Pictures dialog",
+    });
+    builtIns.splice(2, 0, {
+      id: "__windows_photos__",
+      name: "Windows Photos",
     });
   }
 
@@ -1805,6 +1846,10 @@ ipcMain.handle("open-files-with-app", async (event, payload) => {
 
     if (appId === "__print_pictures__") {
       return await openPrintPicturesDialog(existingFilePaths);
+    }
+
+    if (appId === "__windows_photos__") {
+      return await openWithWindowsPhotos(existingFilePaths);
     }
 
     if (!appId || appId === "__default__") {
