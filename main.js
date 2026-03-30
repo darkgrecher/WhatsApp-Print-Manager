@@ -218,8 +218,15 @@ async function listOpenWithApps(filePath) {
   return [...builtIns, ...resolved];
 }
 
-async function launchWithCommandTemplate(commandTemplate, filePath) {
+async function launchWithCommandTemplate(commandTemplate, filePaths) {
   const { execFile } = require("child_process");
+
+  const normalizedFilePaths = Array.isArray(filePaths)
+    ? filePaths.filter(Boolean)
+    : [filePaths].filter(Boolean);
+  if (normalizedFilePaths.length === 0) {
+    throw new Error("No files provided");
+  }
 
   const splitArgs = (text) => {
     if (!text) return [];
@@ -259,15 +266,22 @@ async function launchWithCommandTemplate(commandTemplate, filePath) {
 
   exePath = expandEnvVars(exePath);
 
-  const fileArgQuoted = `"${filePath}"`;
-  const hasPlaceholder = /%1|%L|%l|%\*/.test(argsPart);
-  let finalArgsText = argsPart.replace(
-    /"%1"|%1|"%L"|%L|"%l"|%l|%\*/g,
-    fileArgQuoted,
-  );
+  const quotedFileArgs = normalizedFilePaths.map((fp) => `"${fp}"`);
+  const firstFileArg = quotedFileArgs[0];
+  const remainingFileArgs = quotedFileArgs.slice(1);
+  const hasSinglePlaceholder = /%1|%L|%l/.test(argsPart);
+  const hasMultiPlaceholder = /%\*/.test(argsPart);
 
-  if (!hasPlaceholder) {
-    finalArgsText = `${finalArgsText} ${fileArgQuoted}`.trim();
+  let finalArgsText = argsPart.replace(
+    /"%1"|%1|"%L"|%L|"%l"|%l/g,
+    firstFileArg,
+  );
+  finalArgsText = finalArgsText.replace(/%\*/g, quotedFileArgs.join(" "));
+
+  if (!hasSinglePlaceholder && !hasMultiPlaceholder) {
+    finalArgsText = `${finalArgsText} ${quotedFileArgs.join(" ")}`.trim();
+  } else if (hasSinglePlaceholder && !hasMultiPlaceholder && remainingFileArgs.length > 0) {
+    finalArgsText = `${finalArgsText} ${remainingFileArgs.join(" ")}`.trim();
   }
 
   finalArgsText = finalArgsText.replace(/\s+\/dde\b.*$/i, "").trim();
@@ -1755,17 +1769,23 @@ ipcMain.handle("open-files-with-app", async (event, payload) => {
     }
 
     const commandTemplate = session.commandMap.get(appId);
-    const results = [];
-    for (const filePath of existingFilePaths) {
-      try {
-        await launchWithCommandTemplate(commandTemplate, filePath);
-        results.push({ filePath, success: true });
-      } catch (error) {
-        results.push({ filePath, error: error.message || "Failed to open" });
-      }
+    try {
+      // Launch once with all selected files so compatible apps can open tabs
+      // in a single window instead of spawning one window per file.
+      await launchWithCommandTemplate(commandTemplate, existingFilePaths);
+      return {
+        success: true,
+        results: existingFilePaths.map((filePath) => ({ filePath, success: true })),
+      };
+    } catch (error) {
+      return {
+        error: error.message || "Failed to open",
+        results: existingFilePaths.map((filePath) => ({
+          filePath,
+          error: error.message || "Failed to open",
+        })),
+      };
     }
-
-    return { success: results.some((r) => r.success), results };
   } catch (error) {
     return { error: error.message || "Failed to open files" };
   }
