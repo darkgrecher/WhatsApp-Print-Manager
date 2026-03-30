@@ -80,7 +80,11 @@ function setupButtonListeners() {
   document.addEventListener("click", (e) => {
     const profileDropdown = document.getElementById("profile-dropdown");
     const profileSection = document.getElementById("profile-section");
-    if (profileDropdown && profileSection && !profileSection.contains(e.target)) {
+    if (
+      profileDropdown &&
+      profileSection &&
+      !profileSection.contains(e.target)
+    ) {
       profileDropdown.classList.add("hidden");
     }
 
