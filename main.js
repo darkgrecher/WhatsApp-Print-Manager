@@ -161,7 +161,10 @@ async function launchWithCommandTemplate(commandTemplate, filePath) {
   };
 
   const expandEnvVars = (value) =>
-    String(value || "").replace(/%([^%]+)%/g, (_, name) => process.env[name] || `%${name}%`);
+    String(value || "").replace(
+      /%([^%]+)%/g,
+      (_, name) => process.env[name] || `%${name}%`,
+    );
 
   const raw = String(commandTemplate || "").trim();
   if (!raw) throw new Error("Invalid application command");
@@ -183,7 +186,10 @@ async function launchWithCommandTemplate(commandTemplate, filePath) {
 
   const fileArgQuoted = `"${filePath}"`;
   const hasPlaceholder = /%1|%L|%l|%\*/.test(argsPart);
-  let finalArgsText = argsPart.replace(/"%1"|%1|"%L"|%L|"%l"|%l|%\*/g, fileArgQuoted);
+  let finalArgsText = argsPart.replace(
+    /"%1"|%1|"%L"|%L|"%l"|%l|%\*/g,
+    fileArgQuoted,
+  );
 
   if (!hasPlaceholder) {
     finalArgsText = `${finalArgsText} ${fileArgQuoted}`.trim();
@@ -1660,7 +1666,9 @@ ipcMain.handle("open-files-with-app", async (event, payload) => {
     cleanupOpenWithSessions();
     const session = openWithSessions.get(requestId);
     if (!session || !session.commandMap || !session.commandMap.has(appId)) {
-      return { error: "App selection expired. Please open the app menu again." };
+      return {
+        error: "App selection expired. Please open the app menu again.",
+      };
     }
 
     const commandTemplate = session.commandMap.get(appId);
