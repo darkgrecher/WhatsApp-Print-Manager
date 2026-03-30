@@ -219,7 +219,7 @@ async function listOpenWithApps(filePath) {
 }
 
 async function launchWithCommandTemplate(commandTemplate, filePaths) {
-  const { execFile } = require("child_process");
+  const { spawn } = require("child_process");
 
   const normalizedFilePaths = Array.isArray(filePaths)
     ? filePaths.filter(Boolean)
@@ -266,42 +266,109 @@ async function launchWithCommandTemplate(commandTemplate, filePaths) {
 
   exePath = expandEnvVars(exePath);
 
-  const quotedFileArgs = normalizedFilePaths.map((fp) => `"${fp}"`);
-  const firstFileArg = quotedFileArgs[0];
-  const remainingFileArgs = quotedFileArgs.slice(1);
-  const hasSinglePlaceholder = /%1|%L|%l/.test(argsPart);
-  const hasMultiPlaceholder = /%\*/.test(argsPart);
+  const launchDetached = (args) =>
+    new Promise((resolve, reject) => {
+      const child = spawn(exePath, args, {
+        windowsHide: true,
+        detached: true,
+        stdio: "ignore",
+      });
+      child.once("error", reject);
+      child.once("spawn", () => {
+        child.unref();
+        resolve();
+      });
+    });
 
-  let finalArgsText = argsPart.replace(
-    /"%1"|%1|"%L"|%L|"%l"|%l/g,
-    firstFileArg,
-  );
-  finalArgsText = finalArgsText.replace(/%\*/g, quotedFileArgs.join(" "));
+  const exeName = path.basename(exePath).toLowerCase();
+  const browserExeNames = new Set([
+    "firefox.exe",
+    "brave.exe",
+    "brave-browser.exe",
+    "chrome.exe",
+    "msedge.exe",
+    "opera.exe",
+  ]);
+  const isOperaLauncher =
+    exeName === "launcher.exe" && /opera/i.test(exePath);
+  const isAcrobat = exeName === "acrobat.exe";
 
-  if (!hasSinglePlaceholder && !hasMultiPlaceholder) {
-    finalArgsText = `${finalArgsText} ${quotedFileArgs.join(" ")}`.trim();
-  } else if (
-    hasSinglePlaceholder &&
-    !hasMultiPlaceholder &&
-    remainingFileArgs.length > 0
+  const buildArgsForPaths = (paths) => {
+    const quotedFileArgs = paths.map((fp) => `"${fp}"`);
+    const firstFileArg = quotedFileArgs[0];
+    const remainingFileArgs = quotedFileArgs.slice(1);
+    const hasSinglePlaceholder = /%1|%L|%l/.test(argsPart);
+    const hasMultiPlaceholder = /%\*/.test(argsPart);
+
+    let finalArgsText = argsPart.replace(
+      /"%1"|%1|"%L"|%L|"%l"|%l/g,
+      firstFileArg,
+    );
+    finalArgsText = finalArgsText.replace(/%\*/g, quotedFileArgs.join(" "));
+
+    if (!hasSinglePlaceholder && !hasMultiPlaceholder) {
+      finalArgsText = `${finalArgsText} ${quotedFileArgs.join(" ")}`.trim();
+    } else if (
+      hasSinglePlaceholder &&
+      !hasMultiPlaceholder &&
+      remainingFileArgs.length > 0
+    ) {
+      finalArgsText = `${finalArgsText} ${remainingFileArgs.join(" ")}`.trim();
+    }
+
+    finalArgsText = finalArgsText.replace(/\s+\/dde\b.*$/i, "").trim();
+    return splitArgs(expandEnvVars(finalArgsText));
+  };
+
+  // Windows Open-With commands for browsers often contain shell-only flags
+  // like `-osint -url %1` that fail with multiple files. For multi-file opens,
+  // switch to browser-native tab arguments in a single process launch.
+  if (
+    normalizedFilePaths.length > 1 &&
+    (browserExeNames.has(exeName) || isOperaLauncher)
   ) {
-    finalArgsText = `${finalArgsText} ${remainingFileArgs.join(" ")}`.trim();
+    const rawTokens = splitArgs(expandEnvVars(argsPart));
+    const passthrough = [];
+
+    for (let i = 0; i < rawTokens.length; i += 1) {
+      const token = rawTokens[i];
+      const lower = token.toLowerCase();
+      if (lower === "-osint") continue;
+      if (lower === "-url" || lower === "--single-argument") {
+        if (i + 1 < rawTokens.length) i += 1;
+        continue;
+      }
+      if (/%1|%l|%L|%\*/i.test(token)) continue;
+      passthrough.push(token);
+    }
+
+    const tabArgs = [];
+    if (exeName === "firefox.exe") {
+      for (const fp of normalizedFilePaths) {
+        tabArgs.push("-new-tab", fp);
+      }
+    } else {
+      for (const fp of normalizedFilePaths) {
+        tabArgs.push("--new-tab", fp);
+      }
+    }
+
+    const finalArgs = [...passthrough, ...tabArgs];
+    await launchDetached(finalArgs);
+    return;
   }
 
-  finalArgsText = finalArgsText.replace(/\s+\/dde\b.*$/i, "").trim();
-  const finalArgs = splitArgs(expandEnvVars(finalArgsText));
+  if (isAcrobat && normalizedFilePaths.length > 1) {
+    // Acrobat command lines are often single-document oriented. Hand off
+    // files one-by-one to the same executable to avoid command failures.
+    for (const fp of normalizedFilePaths) {
+      await launchDetached(buildArgsForPaths([fp]));
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    return;
+  }
 
-  await new Promise((resolve, reject) => {
-    execFile(
-      exePath,
-      finalArgs,
-      { windowsHide: true, detached: true },
-      (error) => {
-        if (error) reject(error);
-        else resolve();
-      },
-    );
-  });
+  await launchDetached(buildArgsForPaths(normalizedFilePaths));
 }
 
 async function launchWindowsOpenWithDialog(filePath) {
