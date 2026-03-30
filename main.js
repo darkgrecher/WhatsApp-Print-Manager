@@ -145,7 +145,10 @@ async function openWithWindowsPhotos(filePaths) {
       }
       return {
         success: true,
-        results: existingFilePaths.map((filePath) => ({ filePath, success: true })),
+        results: existingFilePaths.map((filePath) => ({
+          filePath,
+          success: true,
+        })),
       };
     }
 
@@ -176,7 +179,10 @@ async function openWithWindowsPhotos(filePaths) {
       await runPowerShell(ps);
       return {
         success: true,
-        results: existingFilePaths.map((filePath) => ({ filePath, success: true })),
+        results: existingFilePaths.map((filePath) => ({
+          filePath,
+          success: true,
+        })),
       };
     }
 
@@ -185,12 +191,17 @@ async function openWithWindowsPhotos(filePaths) {
       const uri = `ms-photos:viewer?fileName=${encodeURIComponent(singleFile)}`;
       const ps = `$ErrorActionPreference='Stop'; Start-Process ${psQuote(uri)}`;
       await runPowerShell(ps);
-      return { success: true, results: [{ filePath: singleFile, success: true }] };
+      return {
+        success: true,
+        results: [{ filePath: singleFile, success: true }],
+      };
     } catch (_) {
       await shell.openPath(singleFile);
       return {
         success: true,
-        results: [{ filePath: singleFile, success: true, fallback: "default-app" }],
+        results: [
+          { filePath: singleFile, success: true, fallback: "default-app" },
+        ],
       };
     }
   } catch (error) {
