@@ -1479,7 +1479,9 @@ function hideOpenWithDropdown() {
 
 function getDefaultOpenWithApp(apps, isImageType) {
   if (isImageType) {
-    const printPicturesApp = apps.find((app) => app.id === "__print_pictures__");
+    const printPicturesApp = apps.find(
+      (app) => app.id === "__print_pictures__",
+    );
     if (printPicturesApp) {
       return { id: printPicturesApp.id, name: printPicturesApp.name };
     }
@@ -1558,8 +1560,7 @@ async function toggleOpenWithDropdown(event) {
     return;
   }
 
-  const isImageType =
-    selectedTypes.size === 1 && selectedTypes.has("image");
+  const isImageType = selectedTypes.size === 1 && selectedTypes.has("image");
 
   if (isImageType && selectedOpenWithApp.id === "__default__") {
     selectedOpenWithApp = getDefaultOpenWithApp(apps, true);
@@ -1604,8 +1605,7 @@ async function openSelectedWithApp(preferredApp) {
     return;
   }
 
-  const isImageType =
-    selectedTypes.size === 1 && selectedTypes.has("image");
+  const isImageType = selectedTypes.size === 1 && selectedTypes.has("image");
 
   let appToUse = preferredApp || selectedOpenWithApp;
   if (isImageType && appToUse.id === "__default__") {
