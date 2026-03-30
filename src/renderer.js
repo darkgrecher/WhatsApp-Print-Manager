@@ -1587,7 +1587,11 @@ async function toggleOpenWithDropdown(event) {
   renderOpenWithDropdown(apps);
 }
 
-async function openFilesWithAppSelection(filePaths, preferredApp, options = {}) {
+async function openFilesWithAppSelection(
+  filePaths,
+  preferredApp,
+  options = {},
+) {
   const { showSuccessToast = true } = options;
   const normalizedFilePaths = Array.isArray(filePaths)
     ? filePaths.filter(Boolean)
@@ -1604,7 +1608,9 @@ async function openFilesWithAppSelection(filePaths, preferredApp, options = {}) 
     return;
   }
 
-  const appListResult = await window.api.getOpenWithApps(normalizedFilePaths[0]);
+  const appListResult = await window.api.getOpenWithApps(
+    normalizedFilePaths[0],
+  );
   if (appListResult.error) {
     showToast(`Could not load applications: ${appListResult.error}`, "error");
     return;
