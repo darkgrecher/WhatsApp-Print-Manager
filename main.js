@@ -20,9 +20,205 @@ let DOWNLOADS_DIR;
 // Survives across refreshChats() calls so the UI doesn't lose enrichment.
 const enrichedChatCache = new Map();
 let enrichmentInProgress = false;
+const openWithSessions = new Map();
 
 // License server URL (change this to your production backend URL)
 const LICENSE_API_URL = "https://whatsapp-print-admin.vercel.app/api";
+
+function psQuote(value) {
+  return "'" + String(value == null ? "" : value).replace(/'/g, "''") + "'";
+}
+
+function runPowerShell(script) {
+  return new Promise((resolve, reject) => {
+    const { execFile } = require("child_process");
+    execFile(
+      "powershell.exe",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+      { windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error((stderr || error.message || "").trim()));
+          return;
+        }
+        resolve((stdout || "").trim());
+      },
+    );
+  });
+}
+
+function cleanupOpenWithSessions() {
+  const now = Date.now();
+  for (const [key, value] of openWithSessions.entries()) {
+    if (!value || now - value.createdAt > 15 * 60 * 1000) {
+      openWithSessions.delete(key);
+    }
+  }
+}
+
+function normalizeJsonArray(jsonText) {
+  if (!jsonText) return [];
+  const parsed = JSON.parse(jsonText);
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
+async function listOpenWithApps(filePath) {
+  if (process.platform !== "win32") {
+    return [{ id: "__default__", name: "Default application" }];
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  if (!ext) {
+    return [{ id: "__default__", name: "Default application" }];
+  }
+
+  const ps = [
+    "$ErrorActionPreference='Stop'",
+    "$ext = " + psQuote(ext),
+    "$apps = New-Object System.Collections.Generic.List[Object]",
+    "function Add-App([string]$id,[string]$name,[string]$command) {",
+    "  if ([string]::IsNullOrWhiteSpace($id) -or [string]::IsNullOrWhiteSpace($command)) { return }",
+    "  if ([string]::IsNullOrWhiteSpace($name)) { $name = $id }",
+    "  $apps.Add([PSCustomObject]@{ id = $id; name = $name; command = $command })",
+    "}",
+    "$progIds = New-Object System.Collections.Generic.HashSet[string]",
+    "$assocLine = cmd /c ('assoc ' + $ext) 2>$null",
+    "if ($assocLine -and $assocLine -match '=') {",
+    "  [void]$progIds.Add(($assocLine -split '=', 2)[1].Trim())",
+    "}",
+    "$userChoiceKey = 'Registry::HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\' + $ext + '\\UserChoice'",
+    "if (Test-Path $userChoiceKey) {",
+    "  $uc = (Get-ItemProperty $userChoiceKey -ErrorAction SilentlyContinue).ProgId",
+    "  if ($uc) { [void]$progIds.Add($uc) }",
+    "}",
+    "$extOpenWithProgids = 'Registry::HKEY_CLASSES_ROOT\\' + $ext + '\\OpenWithProgids'",
+    "if (Test-Path $extOpenWithProgids) {",
+    "  foreach ($prop in (Get-Item $extOpenWithProgids).Property) { [void]$progIds.Add($prop) }",
+    "}",
+    "foreach ($progId in $progIds) {",
+    "  if ([string]::IsNullOrWhiteSpace($progId)) { continue }",
+    "  $cmdKey = 'Registry::HKEY_CLASSES_ROOT\\' + $progId + '\\shell\\open\\command'",
+    "  if (Test-Path $cmdKey) {",
+    "    $command = (Get-ItemProperty $cmdKey -ErrorAction SilentlyContinue).'(default)'",
+    "    if ($command) {",
+    "      $name = (Get-ItemProperty ('Registry::HKEY_CLASSES_ROOT\\' + $progId) -ErrorAction SilentlyContinue).'(default)'",
+    "      if (-not $name) { $name = $progId }",
+    "      Add-App $progId $name $command",
+    "    }",
+    "  }",
+    "}",
+    "$owList = 'Registry::HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\' + $ext + '\\OpenWithList'",
+    "if (Test-Path $owList) {",
+    "  $props = (Get-ItemProperty $owList -ErrorAction SilentlyContinue).PSObject.Properties | Where-Object { $_.Name -match '^[a-z]$' } | Sort-Object Name",
+    "  foreach ($p in $props) {",
+    "    $exe = [string]$p.Value",
+    "    if ([string]::IsNullOrWhiteSpace($exe)) { continue }",
+    "    $appCmd = 'Registry::HKEY_CLASSES_ROOT\\Applications\\' + $exe + '\\shell\\open\\command'",
+    "    if (Test-Path $appCmd) {",
+    "      $command = (Get-ItemProperty $appCmd -ErrorAction SilentlyContinue).'(default)'",
+    "      if ($command) {",
+    "        $friendly = (Get-ItemProperty ('Registry::HKEY_CLASSES_ROOT\\Applications\\' + $exe) -ErrorAction SilentlyContinue).FriendlyAppName",
+    "        if (-not $friendly) { $friendly = [System.IO.Path]::GetFileNameWithoutExtension($exe) }",
+    "        Add-App ('app:' + $exe.ToLowerInvariant()) $friendly $command",
+    "      }",
+    "    }",
+    "  }",
+    "}",
+    "$apps | Group-Object id | ForEach-Object { $_.Group[0] } | Sort-Object name | ConvertTo-Json -Depth 5 -Compress",
+  ].join("\n");
+
+  const raw = await runPowerShell(ps);
+  const resolved = normalizeJsonArray(raw)
+    .filter((x) => x && x.id && x.command)
+    .map((x) => ({
+      id: String(x.id),
+      name: String(x.name || x.id),
+      command: String(x.command),
+    }));
+
+  return [
+    { id: "__default__", name: "Default application" },
+    { id: "__windows_open_with__", name: "Choose app in Windows..." },
+    ...resolved,
+  ];
+}
+
+async function launchWithCommandTemplate(commandTemplate, filePath) {
+  const { execFile } = require("child_process");
+
+  const splitArgs = (text) => {
+    if (!text) return [];
+    const result = [];
+    const re = /"((?:\\.|[^"])*)"|(\S+)/g;
+    let match;
+    while ((match = re.exec(text)) !== null) {
+      const quoted = match[1];
+      const plain = match[2];
+      const token = quoted != null ? quoted.replace(/\\"/g, '"') : plain;
+      if (token) result.push(token);
+    }
+    return result;
+  };
+
+  const expandEnvVars = (value) =>
+    String(value || "").replace(/%([^%]+)%/g, (_, name) => process.env[name] || `%${name}%`);
+
+  const raw = String(commandTemplate || "").trim();
+  if (!raw) throw new Error("Invalid application command");
+
+  let exePath = "";
+  let argsPart = "";
+  const quotedMatch = raw.match(/^"([^"]+)"\s*(.*)$/);
+  if (quotedMatch) {
+    exePath = quotedMatch[1];
+    argsPart = quotedMatch[2] || "";
+  } else {
+    const plainMatch = raw.match(/^(\S+)\s*(.*)$/);
+    if (!plainMatch) throw new Error("Could not parse application command");
+    exePath = plainMatch[1];
+    argsPart = plainMatch[2] || "";
+  }
+
+  exePath = expandEnvVars(exePath);
+
+  const fileArgQuoted = `"${filePath}"`;
+  const hasPlaceholder = /%1|%L|%l|%\*/.test(argsPart);
+  let finalArgsText = argsPart.replace(/"%1"|%1|"%L"|%L|"%l"|%l|%\*/g, fileArgQuoted);
+
+  if (!hasPlaceholder) {
+    finalArgsText = `${finalArgsText} ${fileArgQuoted}`.trim();
+  }
+
+  finalArgsText = finalArgsText.replace(/\s+\/dde\b.*$/i, "").trim();
+  const finalArgs = splitArgs(expandEnvVars(finalArgsText));
+
+  await new Promise((resolve, reject) => {
+    execFile(
+      exePath,
+      finalArgs,
+      { windowsHide: true, detached: true },
+      (error) => {
+        if (error) reject(error);
+        else resolve();
+      },
+    );
+  });
+}
+
+async function launchWindowsOpenWithDialog(filePath) {
+  return new Promise((resolve, reject) => {
+    const { execFile } = require("child_process");
+    execFile(
+      "rundll32.exe",
+      ["shell32.dll,OpenAs_RunDLL", filePath],
+      { windowsHide: true },
+      (error) => {
+        if (error) reject(error);
+        else resolve();
+      },
+    );
+  });
+}
 
 function getUserDataPath(...segments) {
   return path.join(app.getPath("userData"), ...segments);
@@ -339,21 +535,10 @@ function initWhatsApp(retryAttempt = 1) {
       await new Promise((r) => setTimeout(r, 1500));
 
       if (attempt < 3) {
-        // Clear stale auth data and version cache so a fresh QR code can be
-        // generated.  The version cache can also cause silent hangs if the
-        // cached WhatsApp Web version is incompatible.
-        if (!eventReceived) {
-          const authPath = getUserDataPath(".wwebjs_auth");
-          try {
-            fs.rmSync(authPath, { recursive: true, force: true });
-            console.log("[WhatsApp] Cleared stale auth data");
-          } catch (_) {}
-          const cachePath = getUserDataPath(".wwebjs_cache");
-          try {
-            fs.rmSync(cachePath, { recursive: true, force: true });
-            console.log("[WhatsApp] Cleared version cache");
-          } catch (_) {}
-        }
+        // Keep persisted auth/session data on automatic retries so users are
+        // not forced to re-scan QR after transient network/startup issues.
+        // A full session reset is available via the explicit "Log Again"
+        // action in the UI.
 
         cleanupStaleLockFiles();
         console.log(`[WhatsApp] Retrying (${reason})...`);
@@ -368,15 +553,15 @@ function initWhatsApp(retryAttempt = 1) {
       }
     };
 
-    // Set an initialization timeout – if no events fire within 30 seconds,
-    // the session data is likely stale and causing a silent hang.
-    const INIT_TIMEOUT_MS = 30000;
+    // Set an initialization timeout – slow networks and low-end machines can
+    // need longer before first events arrive.
+    const INIT_TIMEOUT_MS = 60000;
     const initTimer = setTimeout(async () => {
       if (!eventReceived) {
         console.warn(
-          `[WhatsApp] No events received after ${INIT_TIMEOUT_MS / 1000}s (attempt ${attempt}) – session may be stale`,
+          `[WhatsApp] No events received after ${INIT_TIMEOUT_MS / 1000}s (attempt ${attempt})`,
         );
-        await doRetry("stale session timeout");
+        await doRetry("startup timeout");
       }
     }, INIT_TIMEOUT_MS);
 
@@ -1403,6 +1588,96 @@ ipcMain.handle("open-file", async (event, filePath) => {
     return { success: true };
   }
   return { error: "File not found" };
+});
+
+ipcMain.handle("get-open-with-apps", async (event, filePath) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) {
+      return { error: "File not found", apps: [] };
+    }
+
+    const apps = await listOpenWithApps(filePath);
+    cleanupOpenWithSessions();
+
+    const requestId =
+      typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    const commandMap = new Map(
+      apps
+        .filter(
+          (a) =>
+            a.id !== "__default__" &&
+            a.id !== "__windows_open_with__" &&
+            a.command,
+        )
+        .map((a) => [a.id, a.command]),
+    );
+    openWithSessions.set(requestId, { createdAt: Date.now(), commandMap });
+
+    return {
+      requestId,
+      apps: apps.map((a) => ({ id: a.id, name: a.name })),
+    };
+  } catch (error) {
+    return { error: error.message || "Failed to get app list", apps: [] };
+  }
+});
+
+ipcMain.handle("open-files-with-app", async (event, payload) => {
+  try {
+    const body = payload || {};
+    const requestId = body.requestId;
+    const appId = body.appId;
+    const filePaths = Array.isArray(body.filePaths) ? body.filePaths : [];
+    const existingFilePaths = filePaths.filter((fp) => fp && fs.existsSync(fp));
+
+    if (!existingFilePaths.length) {
+      return { error: "No valid files selected" };
+    }
+
+    if (!appId || appId === "__default__") {
+      for (const filePath of existingFilePaths) {
+        await shell.openPath(filePath);
+      }
+      return { success: true };
+    }
+
+    if (appId === "__windows_open_with__") {
+      const results = [];
+      for (const filePath of existingFilePaths) {
+        try {
+          await launchWindowsOpenWithDialog(filePath);
+          results.push({ filePath, success: true });
+        } catch (error) {
+          results.push({ filePath, error: error.message || "Failed to open" });
+        }
+      }
+      return { success: results.some((r) => r.success), results };
+    }
+
+    cleanupOpenWithSessions();
+    const session = openWithSessions.get(requestId);
+    if (!session || !session.commandMap || !session.commandMap.has(appId)) {
+      return { error: "App selection expired. Please open the app menu again." };
+    }
+
+    const commandTemplate = session.commandMap.get(appId);
+    const results = [];
+    for (const filePath of existingFilePaths) {
+      try {
+        await launchWithCommandTemplate(commandTemplate, filePath);
+        results.push({ filePath, success: true });
+      } catch (error) {
+        results.push({ filePath, error: error.message || "Failed to open" });
+      }
+    }
+
+    return { success: results.some((r) => r.success), results };
+  } catch (error) {
+    return { error: error.message || "Failed to open files" };
+  }
 });
 
 // Open multiple images in the Windows "Print Pictures" dialog

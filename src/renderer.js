@@ -29,13 +29,12 @@ function setupButtonListeners() {
   const btnLoginAgain = document.getElementById("btn-login-again");
   if (btnLoginAgain) {
     btnLoginAgain.addEventListener("click", () => {
-      btnLoginAgain.classList.add("hidden");
       if (btnReconnect) btnReconnect.classList.add("hidden");
       const qrStatus = document.getElementById("qr-status");
       if (qrStatus) qrStatus.textContent = "Clearing session and restarting...";
       const spinner = document.querySelector(".spinner");
       if (spinner) spinner.style.display = "inline-block";
-      restartApplication();
+      loginAgain();
     });
   }
 
@@ -224,7 +223,7 @@ function setupEventListeners() {
         const qrStatusError = document.getElementById("qr-status");
         if (qrStatusError)
           qrStatusError.textContent =
-            "Connection failed due to a stale session or timeout.";
+            "Connection failed due to network/startup timeout.";
         const spinnerError = document.querySelector(".spinner");
         if (spinnerError) spinnerError.style.display = "none";
 
@@ -241,13 +240,10 @@ function setupEventListeners() {
           if (qrImg) qrImg.classList.add("hidden");
           if (spinner) spinner.style.display = "";
           if (qrStatus)
-            qrStatus.textContent = "Session expired. Reconnecting...";
+            qrStatus.textContent = "Connection issue detected. Retrying...";
           startInitTimer();
         }
-        showToast(
-          "Session expired, reconnecting with fresh session...",
-          "info",
-        );
+        showToast("Connection issue detected, retrying...", "info");
         break;
       case "logged_out":
         switchToLoginScreen();
@@ -778,6 +774,11 @@ async function restartApplication() {
 
 async function licenseLogout() {
   showToast("Logging out and restarting...", "info");
+  await window.api.logoutAndRestart();
+}
+
+async function loginAgain() {
+  showToast("Clearing saved session and restarting...", "info");
   await window.api.logoutAndRestart();
 }
 
@@ -1437,17 +1438,12 @@ async function openSelected() {
 
   const filePaths = [];
   const selectedTypes = new Set();
-  let allImages = true;
 
   selectedFiles.forEach((msgId) => {
     const file = currentFiles.find((f) => f.messageId === msgId);
     if (file && file.localPath) {
       filePaths.push(file.localPath);
-      const fType = getFileType(file.fileName);
-      selectedTypes.add(fType);
-      if (fType !== "image") {
-        allImages = false;
-      }
+      selectedTypes.add(getFileType(file.fileName));
     }
   });
 
@@ -1461,14 +1457,44 @@ async function openSelected() {
     return;
   }
 
-  if (allImages) {
-    // Send directly to Windows Print Pictures dialog
-    window.api.openPrintPictures(filePaths);
-  } else {
-    // Standard open for non-image or mixed batches
-    for (const filePath of filePaths) {
-      openFile(filePath);
+  const appListResult = await window.api.getOpenWithApps(filePaths[0]);
+  if (appListResult.error) {
+    showToast(`Could not load applications: ${appListResult.error}`, "error");
+    return;
+  }
+
+  const apps = Array.isArray(appListResult.apps) ? appListResult.apps : [];
+  if (apps.length === 0) {
+    showToast("No compatible applications found", "warning");
+    return;
+  }
+
+  const selectedAppId = await showOpenWithPicker(apps);
+  if (!selectedAppId) {
+    return;
+  }
+
+  const openResult = await window.api.openFilesWithApp({
+    requestId: appListResult.requestId,
+    appId: selectedAppId,
+    filePaths,
+  });
+
+  if (openResult.error) {
+    showToast(`Open failed: ${openResult.error}`, "error");
+    return;
+  }
+
+  if (Array.isArray(openResult.results)) {
+    const failed = openResult.results.filter((r) => r.error).length;
+    const opened = openResult.results.length - failed;
+    if (failed > 0) {
+      showToast(`Opened ${opened} file(s), ${failed} failed`, "warning");
+    } else {
+      showToast(`Opened ${opened} file(s)`, "success");
     }
+  } else {
+    showToast(`Opened ${filePaths.length} file(s)`, "success");
   }
 }
 
@@ -2136,6 +2162,107 @@ function escapeHtml(str) {
 function escapeJs(str) {
   if (!str) return "";
   return str.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function showOpenWithPicker(apps) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.style.position = "fixed";
+    overlay.style.inset = "0";
+    overlay.style.background = "rgba(0, 0, 0, 0.35)";
+    overlay.style.display = "flex";
+    overlay.style.alignItems = "center";
+    overlay.style.justifyContent = "center";
+    overlay.style.zIndex = "11000";
+
+    const card = document.createElement("div");
+    card.style.width = "min(520px, 92vw)";
+    card.style.background = "#fff";
+    card.style.borderRadius = "12px";
+    card.style.padding = "18px";
+    card.style.boxShadow = "0 20px 60px rgba(0, 0, 0, 0.25)";
+
+    const title = document.createElement("h3");
+    title.textContent = "Open Selected With";
+    title.style.margin = "0 0 10px 0";
+    title.style.fontSize = "16px";
+
+    const subtitle = document.createElement("p");
+    subtitle.textContent = "Choose an application for this file type.";
+    subtitle.style.margin = "0 0 12px 0";
+    subtitle.style.color = "#667781";
+    subtitle.style.fontSize = "13px";
+
+    const select = document.createElement("select");
+    select.style.width = "100%";
+    select.style.padding = "10px";
+    select.style.border = "1px solid #d1d5db";
+    select.style.borderRadius = "8px";
+    select.style.fontSize = "13px";
+
+    apps.forEach((app) => {
+      const option = document.createElement("option");
+      option.value = app.id;
+      option.textContent = app.name;
+      select.appendChild(option);
+    });
+
+    const actions = document.createElement("div");
+    actions.style.display = "flex";
+    actions.style.justifyContent = "flex-end";
+    actions.style.gap = "8px";
+    actions.style.marginTop = "14px";
+
+    const cancelButton = document.createElement("button");
+    cancelButton.className = "btn btn-small btn-secondary";
+    cancelButton.textContent = "Cancel";
+
+    const openButton = document.createElement("button");
+    openButton.className = "btn btn-small btn-primary";
+    openButton.textContent = "Open";
+
+    actions.appendChild(cancelButton);
+    actions.appendChild(openButton);
+    card.appendChild(title);
+    card.appendChild(subtitle);
+    card.appendChild(select);
+    card.appendChild(actions);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    const cleanup = () => {
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        cleanup();
+        resolve(null);
+      }
+    };
+
+    cancelButton.addEventListener("click", () => {
+      cleanup();
+      resolve(null);
+    });
+
+    openButton.addEventListener("click", () => {
+      const selectedValue = select.value || null;
+      cleanup();
+      resolve(selectedValue);
+    });
+
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) {
+        cleanup();
+        resolve(null);
+      }
+    });
+
+    document.addEventListener("keydown", onKeyDown);
+    select.focus();
+  });
 }
 
 // ── Toast Notifications ──────────────────────────────────────────────────
