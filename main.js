@@ -131,41 +131,68 @@ async function openPrintPicturesDialog(filePaths) {
 
 async function openWithWindowsPhotos(filePaths) {
   try {
+    const existingFilePaths = Array.isArray(filePaths)
+      ? filePaths.filter((fp) => fp && fs.existsSync(fp))
+      : [];
+
+    if (!existingFilePaths.length) {
+      return { error: "No valid files selected" };
+    }
+
     if (process.platform !== "win32") {
-      for (const fp of filePaths) {
+      for (const fp of existingFilePaths) {
         await shell.openPath(fp);
       }
-      return { success: true };
+      return {
+        success: true,
+        results: existingFilePaths.map((filePath) => ({ filePath, success: true })),
+      };
     }
 
-    const results = [];
-    for (const fp of filePaths) {
-      try {
-        // Photos is a UWP app without a classic shell\open\command entry.
-        // Use the ms-photos URI and fall back to default shell open.
-        const uri = `ms-photos:viewer?fileName=${encodeURIComponent(fp)}`;
-        const ps = `$ErrorActionPreference='Stop'; Start-Process ${psQuote(uri)}`;
-        await runPowerShell(ps);
-        results.push({ filePath: fp, success: true });
-      } catch (err) {
-        try {
-          await shell.openPath(fp);
-          results.push({
-            filePath: fp,
-            success: true,
-            fallback: "default-app",
-          });
-        } catch (fallbackErr) {
-          results.push({
-            filePath: fp,
-            error:
-              fallbackErr.message || err.message || "Failed to open in Photos",
-          });
-        }
+    if (existingFilePaths.length > 1) {
+      const os = require("os");
+      const tempDir = path.join(
+        os.tmpdir(),
+        "WhatsappPrintManager_PhotosBatch_" + Date.now().toString(),
+      );
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      for (const fp of existingFilePaths) {
+        const dest = path.join(tempDir, path.basename(fp));
+        fs.copyFileSync(fp, dest);
       }
+
+      const ps = [
+        "$ErrorActionPreference='Stop'",
+        "$shell = New-Object -ComObject Shell.Application",
+        `$folder = $shell.Namespace(${psQuote(tempDir)})`,
+        "if (-not $folder) { throw 'Cannot open temp folder for Photos batch' }",
+        "$items = $folder.Items()",
+        "if ($items.Count -le 0) { throw 'No items in Photos batch folder' }",
+        "$items.InvokeVerbEx('Open')",
+        "Start-Sleep -Milliseconds 1200",
+      ].join("\n");
+
+      await runPowerShell(ps);
+      return {
+        success: true,
+        results: existingFilePaths.map((filePath) => ({ filePath, success: true })),
+      };
     }
 
-    return { success: results.some((r) => r.success), results };
+    const singleFile = existingFilePaths[0];
+    try {
+      const uri = `ms-photos:viewer?fileName=${encodeURIComponent(singleFile)}`;
+      const ps = `$ErrorActionPreference='Stop'; Start-Process ${psQuote(uri)}`;
+      await runPowerShell(ps);
+      return { success: true, results: [{ filePath: singleFile, success: true }] };
+    } catch (_) {
+      await shell.openPath(singleFile);
+      return {
+        success: true,
+        results: [{ filePath: singleFile, success: true, fallback: "default-app" }],
+      };
+    }
   } catch (error) {
     return { error: error.message || "Failed to open with Windows Photos" };
   }
