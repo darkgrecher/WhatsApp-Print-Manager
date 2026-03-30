@@ -289,8 +289,7 @@ async function launchWithCommandTemplate(commandTemplate, filePaths) {
     "msedge.exe",
     "opera.exe",
   ]);
-  const isOperaLauncher =
-    exeName === "launcher.exe" && /opera/i.test(exePath);
+  const isOperaLauncher = exeName === "launcher.exe" && /opera/i.test(exePath);
   const isAcrobat = exeName === "acrobat.exe";
 
   const buildArgsForPaths = (paths) => {
