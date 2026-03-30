@@ -1495,6 +1495,18 @@ function getDefaultOpenWithApp(apps, isImageType) {
   return { id: "__default__", name: "Default application" };
 }
 
+function getSelectedTypesForPaths(filePaths) {
+  const selectedTypes = new Set();
+
+  filePaths.forEach((filePath) => {
+    const file = currentFiles.find((f) => f.localPath === filePath);
+    const nameFromPath = (filePath || "").split(/[\\/]/).pop() || "";
+    selectedTypes.add(getFileType(file?.fileName || nameFromPath));
+  });
+
+  return selectedTypes;
+}
+
 function renderOpenWithDropdown(apps) {
   const dropdown = document.getElementById("open-with-dropdown");
   if (!dropdown) return;
@@ -1575,25 +1587,24 @@ async function toggleOpenWithDropdown(event) {
   renderOpenWithDropdown(apps);
 }
 
-async function openSelectedWithApp(preferredApp) {
-  if (selectedFiles.size === 0) {
-    showToast("No downloaded files selected", "warning");
-    return;
-  }
+async function openFilesWithAppSelection(filePaths, preferredApp, options = {}) {
+  const { showSuccessToast = true } = options;
+  const normalizedFilePaths = Array.isArray(filePaths)
+    ? filePaths.filter(Boolean)
+    : [];
 
-  const { filePaths, selectedTypes } = getSelectedOpenableFiles();
-
-  if (filePaths.length === 0) {
+  if (normalizedFilePaths.length === 0) {
     showToast("No downloaded files selected to open", "warning");
     return;
   }
 
+  const selectedTypes = getSelectedTypesForPaths(normalizedFilePaths);
   if (selectedTypes.size > 1) {
     showToast("Only files of one type can be opened", "warning");
     return;
   }
 
-  const appListResult = await window.api.getOpenWithApps(filePaths[0]);
+  const appListResult = await window.api.getOpenWithApps(normalizedFilePaths[0]);
   if (appListResult.error) {
     showToast(`Could not load applications: ${appListResult.error}`, "error");
     return;
@@ -1623,7 +1634,7 @@ async function openSelectedWithApp(preferredApp) {
   const openResult = await window.api.openFilesWithApp({
     requestId: appListResult.requestId,
     appId: appToUse.id,
-    filePaths,
+    filePaths: normalizedFilePaths,
   });
 
   if (openResult.error) {
@@ -1636,12 +1647,24 @@ async function openSelectedWithApp(preferredApp) {
     const opened = openResult.results.length - failed;
     if (failed > 0) {
       showToast(`Opened ${opened} file(s), ${failed} failed`, "warning");
-    } else {
+    } else if (showSuccessToast) {
       showToast(`Opened ${opened} file(s)`, "success");
     }
-  } else {
-    showToast(`Opened ${filePaths.length} file(s)`, "success");
+  } else if (showSuccessToast) {
+    showToast(`Opened ${normalizedFilePaths.length} file(s)`, "success");
   }
+}
+
+async function openSelectedWithApp(preferredApp) {
+  if (selectedFiles.size === 0) {
+    showToast("No downloaded files selected", "warning");
+    return;
+  }
+
+  const { filePaths } = getSelectedOpenableFiles();
+  await openFilesWithAppSelection(filePaths, preferredApp, {
+    showSuccessToast: true,
+  });
 }
 
 // ── Open Selected ────────────────────────────────────────────────────────
@@ -1774,8 +1797,10 @@ async function loadPrinters() {
 }
 
 // ── Other Actions ────────────────────────────────────────────────────────
-function openFile(filePath) {
-  window.api.openFile(filePath);
+async function openFile(filePath) {
+  await openFilesWithAppSelection([filePath], selectedOpenWithApp, {
+    showSuccessToast: false,
+  });
 }
 
 function openDownloadsFolder() {

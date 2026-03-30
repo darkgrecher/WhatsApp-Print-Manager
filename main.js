@@ -187,23 +187,14 @@ async function openWithWindowsPhotos(filePaths) {
     }
 
     const singleFile = existingFilePaths[0];
-    try {
-      const uri = `ms-photos:viewer?fileName=${encodeURIComponent(singleFile)}`;
-      const ps = `$ErrorActionPreference='Stop'; Start-Process ${psQuote(uri)}`;
-      await runPowerShell(ps);
-      return {
-        success: true,
-        results: [{ filePath: singleFile, success: true }],
-      };
-    } catch (_) {
-      await shell.openPath(singleFile);
-      return {
-        success: true,
-        results: [
-          { filePath: singleFile, success: true, fallback: "default-app" },
-        ],
-      };
+    const shellResult = await shell.openPath(singleFile);
+    if (shellResult) {
+      return { error: shellResult };
     }
+    return {
+      success: true,
+      results: [{ filePath: singleFile, success: true }],
+    };
   } catch (error) {
     return { error: error.message || "Failed to open with Windows Photos" };
   }
@@ -289,11 +280,11 @@ async function listOpenWithApps(filePath) {
     { id: "__windows_open_with__", name: "Choose app in Windows..." },
   ];
   if (isImage) {
-    builtIns.splice(1, 0, {
+    builtIns.push({
       id: "__print_pictures__",
       name: "Print Pictures dialog",
     });
-    builtIns.splice(2, 0, {
+    builtIns.push({
       id: "__windows_photos__",
       name: "Windows Photos",
     });
