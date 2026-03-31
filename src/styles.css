@@ -875,9 +875,132 @@ body {
   background: #fce7f3;
   color: #db2777;
 }
+.file-icon.chat {
+  background: var(--wa-light-green);
+  color: var(--wa-teal);
+}
 .file-icon.other {
   background: #f3f4f6;
   color: #6b7280;
+}
+
+/* ── WhatsApp-style Chat Bubbles ─────────────────────────────────────────── */
+.chat-bubble {
+  background: var(--wa-light-green);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 4px 0;
+  max-width: 85%;
+  position: relative;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+}
+
+.chat-bubble.file-unread {
+  background: #c8f0b4;
+}
+
+.chat-bubble-sender {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--wa-teal);
+  margin-bottom: 4px;
+}
+
+.chat-bubble-text {
+  font-size: 14px;
+  color: var(--text-primary);
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  line-height: 1.4;
+}
+
+.chat-bubble-time {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: right;
+  margin-top: 4px;
+}
+
+/* Voice message bubble */
+.voice-bubble {
+  background: var(--wa-light-green);
+}
+
+.voice-message-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.voice-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.voice-waveform {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  height: 24px;
+}
+
+.voice-waveform span {
+  display: inline-block;
+  width: 3px;
+  background: var(--wa-teal);
+  border-radius: 2px;
+  opacity: 0.6;
+}
+
+.voice-waveform span:nth-child(1) { height: 8px; }
+.voice-waveform span:nth-child(2) { height: 14px; }
+.voice-waveform span:nth-child(3) { height: 20px; }
+.voice-waveform span:nth-child(4) { height: 12px; }
+.voice-waveform span:nth-child(5) { height: 18px; }
+.voice-waveform span:nth-child(6) { height: 10px; }
+.voice-waveform span:nth-child(7) { height: 16px; }
+.voice-waveform span:nth-child(8) { height: 22px; }
+.voice-waveform span:nth-child(9) { height: 14px; }
+.voice-waveform span:nth-child(10) { height: 8px; }
+
+.btn-voice-download {
+  background: var(--wa-green);
+  border: none;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+
+.btn-voice-download:hover {
+  background: var(--wa-green-dark);
+  transform: scale(1.05);
+}
+
+/* Inline audio player for voice messages */
+.voice-audio-player {
+  flex: 1;
+  height: 32px;
+  max-width: 250px;
+  border-radius: 16px;
+}
+
+.voice-audio-player::-webkit-media-controls-panel {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 16px;
+}
+
+.voice-audio-player::-webkit-media-controls-play-button {
+  background-color: var(--wa-green);
+  border-radius: 50%;
 }
 
 .file-details {

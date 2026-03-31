@@ -1173,19 +1173,20 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
                 .filter(Boolean)
             : [];
 
-        // Only printable types are relevant for a print manager: images and documents.
-        const MEDIA_TYPES = ["image", "document"];
+        // Include: text messages, voice notes, images, and documents (no video)
+        const ALLOWED_TYPES = ["chat", "image", "document", "ptt", "audio"];
 
         return {
           unreadCount,
           unreadIds,
           messages: allMsgs
-            .filter((m) => m.hasMedia || MEDIA_TYPES.includes(m.type))
+            .filter((m) => m.hasMedia || ALLOWED_TYPES.includes(m.type))
             .map((m) => ({
               id: m.id?._serialized,
-              type: m.type || "file",
+              type: m.type || "chat",
               timestamp: m.t || 0,
               body: m.body || m.caption || "",
+              sender: m.notifyName || m.senderObj?.pushname || m.senderObj?.name || null,
               fileName: m.filename || m.mediaFilename || null,
               mimeType: m.mimetype || null,
               fileSize: m.size || m.filesize || null,
@@ -1225,9 +1226,10 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
       return {
         messageId: raw.id,
         chatId,
-        sender: "Unknown",
+        sender: raw.sender || raw.notifyName || raw.pushName || "Unknown",
         timestamp: raw.timestamp,
         type: raw.type,
+        body: raw.body || "",
         caption: raw.body,
         fileName,
         mimeType,
@@ -1243,9 +1245,10 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
       const info = {
         messageId: msg.id._serialized,
         chatId,
-        sender: "Unknown",
+        sender: msg._data?.notifyName || msg._data?.pushName || msg.author || "Unknown",
         timestamp: msg.timestamp,
         type: msg.type,
+        body: msg.body || "",
         caption: msg.body || "",
         // Try both capitalisations — WhatsApp Web store uses lowercase 'filename'
         // but some ww.js versions alias it as 'fileName' (capital N).
@@ -1319,12 +1322,12 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         }
 
         // 3. Only process messages not already shown from the in-memory store.
-        // Restrict to printable types only (images and documents).
-        const PRINTABLE_TYPES = ["image", "document"];
+        // Include: text messages, voice notes, images, and documents (no video)
+        const ALLOWED_TYPES = ["chat", "image", "document", "ptt", "audio"];
         const newMediaMsgs = serverMessages
           .filter(
             (m) =>
-              (m.hasMedia || PRINTABLE_TYPES.includes(m.type)) &&
+              (m.hasMedia || ALLOWED_TYPES.includes(m.type)) &&
               !sentIds.has(m.id._serialized),
           )
           .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -1357,7 +1360,7 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         //    already on disk.  Phase 2 skips those messages via sentIds, so no
         //    correction ever reaches the renderer.  We fix that here.
         const allPrintable = serverMessages.filter(
-          (m) => m.hasMedia || PRINTABLE_TYPES.includes(m.type),
+          (m) => m.hasMedia || ALLOWED_TYPES.includes(m.type),
         );
         for (const msg of allPrintable) {
           const info = extractFileInfo(msg);

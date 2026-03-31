@@ -1223,6 +1223,45 @@ function renderFileItem(file) {
   const statusBadge = getStatusBadge(file);
   const safeMsgId = file.messageId.replace(/[^a-zA-Z0-9]/g, "_");
   const unreadClass = file.isUnread ? "file-unread" : "";
+  const senderName = file.sender || "You";
+
+  // For text messages (chat type), render as WhatsApp-style chat bubble
+  const isChatMessage = file.type === "chat";
+  
+  if (isChatMessage) {
+    const messageText = file.body || "(empty message)";
+    return `
+      <div class="chat-bubble ${unreadClass}" data-message-id="${escapeHtml(file.messageId)}" id="file-${safeMsgId}">
+        <div class="chat-bubble-sender">${escapeHtml(senderName)}</div>
+        <div class="chat-bubble-text">${escapeHtml(messageText)}</div>
+        <div class="chat-bubble-time">${time}</div>
+      </div>
+    `;
+  }
+
+  // For voice messages (ptt/audio), render as WhatsApp-style voice bubble with inline player
+  const isVoiceMessage = file.type === "ptt" || file.type === "audio";
+  
+  if (isVoiceMessage) {
+    const audioSrc = file.isDownloaded ? `file:///${file.localPath.replace(/\\/g, "/")}` : "";
+    return `
+      <div class="chat-bubble voice-bubble ${unreadClass}" data-message-id="${escapeHtml(file.messageId)}" id="file-${safeMsgId}">
+        <div class="chat-bubble-sender">${escapeHtml(senderName)}</div>
+        <div class="voice-message-content">
+          <div class="voice-icon">🎤</div>
+          ${file.isDownloaded 
+            ? `<audio class="voice-audio-player" controls preload="metadata" src="${escapeHtml(audioSrc)}"></audio>`
+            : `<div class="voice-waveform">
+                <span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span>
+              </div>
+              <button class="btn-voice-download" data-action="download-file" data-msg-id="${escapeHtml(file.messageId)}" data-filename="${escapeHtml(file.fileName)}" title="Download">⬇️</button>`
+          }
+        </div>
+        <div class="chat-bubble-time">${time}${size ? ` • ${size}` : ""}</div>
+      </div>
+    `;
+  }
 
   return `
     <div class="file-item ${isSelected} ${unreadClass}" data-message-id="${escapeHtml(file.messageId)}" id="file-${safeMsgId}">
@@ -1236,7 +1275,7 @@ function renderFileItem(file) {
           <span>${file.type || "file"}</span>
           ${size ? `<span>${size}</span>` : ""}
           <span>${time}</span>
-          <span>From: ${escapeHtml(file.sender)}</span>
+          <span>From: ${escapeHtml(senderName)}</span>
         </div>
       </div>
       ${statusBadge}
@@ -2197,6 +2236,12 @@ function getFileIcon(file) {
     return {
       class: "audio",
       icon: `<svg class="file-type-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
+    };
+  }
+  if (type === "chat") {
+    return {
+      class: "chat",
+      icon: `<svg class="file-type-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
     };
   }
   return {
