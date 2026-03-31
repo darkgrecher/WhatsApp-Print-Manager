@@ -281,6 +281,10 @@ async function listOpenWithApps(filePath) {
   ];
   if (isImage) {
     builtIns.push({
+      id: "__paint__",
+      name: "Paint",
+    });
+    builtIns.push({
       id: "__print_pictures__",
       name: "Print Pictures dialog",
     });
@@ -1876,6 +1880,29 @@ ipcMain.handle("open-files-with-app", async (event, payload) => {
 
     if (!existingFilePaths.length) {
       return { error: "No valid files selected" };
+    }
+
+    if (appId === "__paint__") {
+      // Open files in Paint - Paint only supports one file at a time
+      const results = [];
+      for (const filePath of existingFilePaths) {
+        try {
+          const { spawn } = require("child_process");
+          const child = spawn("mspaint.exe", [filePath], {
+            detached: true,
+            stdio: "ignore",
+          });
+          child.unref();
+          results.push({ filePath, success: true });
+          // Small delay between instances to ensure proper launching
+          if (existingFilePaths.length > 1) {
+            await new Promise((resolve) => setTimeout(resolve, 150));
+          }
+        } catch (error) {
+          results.push({ filePath, error: error.message });
+        }
+      }
+      return { success: results.some((r) => r.success), results };
     }
 
     if (appId === "__print_pictures__") {
