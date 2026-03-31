@@ -277,7 +277,7 @@ async function listOpenWithApps(filePath) {
 
   const builtIns = [
     { id: "__default__", name: "Default application" },
-    { id: "__windows_open_with__", name: "Choose app in Windows..." },
+    
   ];
   if (isImage) {
     builtIns.push({
