@@ -44,7 +44,8 @@ function setupButtonListeners() {
 
   // Topbar buttons
   const btnRefresh = document.getElementById("btn-refresh");
-  if (btnRefresh) btnRefresh.addEventListener("click", () => refreshChats());
+  if (btnRefresh)
+    btnRefresh.addEventListener("click", () => restartApplication());
 
   const btnOpenFolder = document.getElementById("btn-open-folder");
   if (btnOpenFolder)
@@ -235,7 +236,10 @@ function setupEventListeners() {
           badge.style.background = "#f59e0b";
           badge.style.color = "white";
         }
-        showToast("WhatsApp connection lost. Recovering automatically...", "warning");
+        showToast(
+          "WhatsApp connection lost. Recovering automatically...",
+          "warning",
+        );
         break;
       case "recovery_failed":
         if (badge) {
@@ -244,7 +248,10 @@ function setupEventListeners() {
           badge.style.background = "#dc2626";
           badge.style.color = "white";
         }
-        showToast("Automatic recovery failed. Please restart the app.", "error");
+        showToast(
+          "Automatic recovery failed. Please restart the app.",
+          "error",
+        );
         document.getElementById("btn-reconnect").classList.remove("hidden");
         break;
       case "disconnected":
@@ -438,7 +445,7 @@ function setupEventListeners() {
       file.localPath = localPath;
       if (fileName) file.fileName = fileName;
 
-      // Update DOM: enable the checkbox
+      // Update DOM: enable the checkbox and update status badge + action buttons
       const safeMsgId = messageId.replace(/[^a-zA-Z0-9]/g, "_");
       const fileEl = document.getElementById(`file-${safeMsgId}`);
       if (fileEl) {
@@ -446,6 +453,22 @@ function setupEventListeners() {
         if (checkbox) {
           checkbox.disabled = false;
           checkbox.removeAttribute("title");
+        }
+
+        // Update status badge to show "✓ Ready"
+        const statusEl = fileEl.querySelector(".status-badge");
+        if (statusEl) {
+          statusEl.className = "status-badge downloaded";
+          statusEl.textContent = "✓ Ready";
+        }
+
+        // Update action buttons: replace download button with open buttons
+        const actionsDiv = fileEl.querySelector(".file-actions");
+        if (actionsDiv) {
+          actionsDiv.innerHTML = `
+            <button class="btn-file-action" data-action="open-file" data-path="${escapeHtml(localPath)}">Open</button>
+            <button class="btn-crowbar" data-action="open-with-dialog" data-path="${escapeHtml(localPath)}" title="Choose app...">🔧</button>
+          `;
         }
       }
 
@@ -520,7 +543,9 @@ function setupEventListeners() {
         timestamp: data.timestamp,
         type: data.type,
         body: data.body || "",
-        fileName: data.fileName || `${data.type}_${data.timestamp}.${mime.extension(data.mimeType || "application/octet-stream") || "bin"}`,
+        fileName:
+          data.fileName ||
+          `${data.type}_${data.timestamp}.${mime.extension(data.mimeType || "application/octet-stream") || "bin"}`,
         mimeType: data.mimeType,
         fileSize: data.fileSize,
         isDownloaded: data.autoDownloaded || false,
@@ -1138,8 +1163,8 @@ async function selectChat(chatId, chatName) {
   let html = "";
 
   // Sort messages chronologically (oldest first, newest at bottom)
-  const sortedFiles = [...unreadFiles].sort((a, b) => 
-    (a.timestamp || 0) - (b.timestamp || 0)
+  const sortedFiles = [...unreadFiles].sort(
+    (a, b) => (a.timestamp || 0) - (b.timestamp || 0),
   );
 
   // Check if there are unread messages
@@ -1168,7 +1193,8 @@ async function selectChat(chatId, chatName) {
 
   if (hasOlderFiles) {
     // Prepend loading indicator at the top (older messages load at top)
-    html = `<div class="older-files-loading" id="older-files-loading">
+    html =
+      `<div class="older-files-loading" id="older-files-loading">
       <div class="spinner" style="width:20px;height:20px;border-width:2px"></div>
       <span style="margin-left:8px;color:var(--text-secondary)">Loading older messages...</span>
     </div>` + html;
@@ -1189,7 +1215,7 @@ async function selectChat(chatId, chatName) {
 
   updateSelectionUI();
   loadDocumentThumbnails();
-  
+
   // Scroll to unread divider if present, otherwise to bottom (newest messages)
   setTimeout(() => {
     const unreadDivider = document.getElementById("unread-divider");
@@ -1232,7 +1258,7 @@ function renderFileItem(file) {
 
   // For text messages (chat type), render as WhatsApp-style chat bubble
   const isChatMessage = file.type === "chat";
-  
+
   if (isChatMessage) {
     const messageText = file.body || "(empty message)";
     return `
@@ -1246,17 +1272,20 @@ function renderFileItem(file) {
 
   // For voice messages (ptt/audio), render as WhatsApp-style voice bubble with inline player
   const isVoiceMessage = file.type === "ptt" || file.type === "audio";
-  
+
   if (isVoiceMessage) {
-    const audioSrc = file.isDownloaded ? `file:///${file.localPath.replace(/\\/g, "/")}` : "";
+    const audioSrc = file.isDownloaded
+      ? `file:///${file.localPath.replace(/\\/g, "/")}`
+      : "";
     return `
       <div class="chat-bubble voice-bubble ${fromMeClass} ${unreadClass}" data-message-id="${escapeHtml(file.messageId)}" id="file-${safeMsgId}">
         <div class="chat-bubble-sender">${escapeHtml(senderName)}</div>
         <div class="voice-message-content">
           <div class="voice-icon">🎤</div>
-          ${file.isDownloaded 
-            ? `<audio class="voice-audio-player" controls preload="metadata" src="${escapeHtml(audioSrc)}"></audio>`
-            : `<div class="voice-waveform">
+          ${
+            file.isDownloaded
+              ? `<audio class="voice-audio-player" controls preload="metadata" src="${escapeHtml(audioSrc)}"></audio>`
+              : `<div class="voice-waveform">
                 <span></span><span></span><span></span><span></span><span></span>
                 <span></span><span></span><span></span><span></span><span></span>
               </div>
@@ -1333,8 +1362,8 @@ function renderFiles() {
   const fileList = document.getElementById("file-list");
 
   // Sort ALL messages chronologically (oldest first, newest at bottom)
-  const sortedFiles = [...currentFiles].sort((a, b) => 
-    (a.timestamp || 0) - (b.timestamp || 0)
+  const sortedFiles = [...currentFiles].sort(
+    (a, b) => (a.timestamp || 0) - (b.timestamp || 0),
   );
 
   // Check if there are unread messages
@@ -1366,7 +1395,7 @@ function renderFiles() {
   fileList.innerHTML = html;
   attachFileEventListeners(fileList);
   loadDocumentThumbnails();
-  
+
   // Scroll to unread divider if present, otherwise to bottom
   setTimeout(() => {
     const unreadDivider = document.getElementById("unread-divider");
@@ -2307,10 +2336,12 @@ function getDateKey(timestamp) {
 
 function renderFilesGroupedByDate(files, reverseOrder = true) {
   // Sort files by timestamp (oldest first for WhatsApp-style display)
-  const sortedFiles = [...files].sort((a, b) => 
-    reverseOrder ? (a.timestamp || 0) - (b.timestamp || 0) : (b.timestamp || 0) - (a.timestamp || 0)
+  const sortedFiles = [...files].sort((a, b) =>
+    reverseOrder
+      ? (a.timestamp || 0) - (b.timestamp || 0)
+      : (b.timestamp || 0) - (a.timestamp || 0),
   );
-  
+
   // Group files by date
   const groups = new Map();
   for (const file of sortedFiles) {
@@ -2321,10 +2352,10 @@ function renderFilesGroupedByDate(files, reverseOrder = true) {
 
   let html = "";
   // Sort date keys (oldest first when reverseOrder is true)
-  const sortedKeys = [...groups.keys()].sort((a, b) => 
-    reverseOrder ? a.localeCompare(b) : b.localeCompare(a)
+  const sortedKeys = [...groups.keys()].sort((a, b) =>
+    reverseOrder ? a.localeCompare(b) : b.localeCompare(a),
   );
-  
+
   for (const key of sortedKeys) {
     const groupFiles = groups.get(key);
     const label = formatDateLabel(groupFiles[0].timestamp);
@@ -2502,7 +2533,7 @@ function setupChatInputBar() {
 async function sendTextMessage() {
   const messageInput = document.getElementById("chat-message-input");
   const message = messageInput?.value?.trim();
-  
+
   if (!message || !currentChatId) {
     if (!currentChatId) showToast("Please select a chat first", "error");
     return;
@@ -2511,7 +2542,7 @@ async function sendTextMessage() {
   try {
     messageInput.value = "";
     messageInput.focus();
-    
+
     const result = await window.api.sendTextMessage(currentChatId, message);
     if (result.error) {
       showToast(`Failed to send: ${result.error}`, "error");
@@ -2537,7 +2568,7 @@ async function startVoiceRecording() {
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    
+
     // Try ogg/opus first (better WhatsApp compatibility), fall back to webm
     let mimeType = "audio/ogg;codecs=opus";
     if (!MediaRecorder.isTypeSupported(mimeType)) {
@@ -2546,26 +2577,30 @@ async function startVoiceRecording() {
     if (!MediaRecorder.isTypeSupported(mimeType)) {
       mimeType = "audio/webm";
     }
-    
+
     mediaRecorder = new MediaRecorder(stream, { mimeType });
     audioChunks = [];
-    
+
     mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) {
         audioChunks.push(e.data);
       }
     };
-    
+
     mediaRecorder.onstop = async () => {
-      stream.getTracks().forEach(track => track.stop());
-      
+      stream.getTracks().forEach((track) => track.stop());
+
       if (audioChunks.length > 0) {
         const audioBlob = new Blob(audioChunks, { type: mimeType });
         const reader = new FileReader();
         reader.onloadend = async () => {
           const base64Audio = reader.result.split(",")[1];
           try {
-            const result = await window.api.sendVoiceMessage(currentChatId, base64Audio, mimeType);
+            const result = await window.api.sendVoiceMessage(
+              currentChatId,
+              base64Audio,
+              mimeType,
+            );
             if (result.error) {
               showToast(`Failed to send voice: ${result.error}`, "error");
             } else {
@@ -2577,16 +2612,15 @@ async function startVoiceRecording() {
         };
         reader.readAsDataURL(audioBlob);
       }
-      
+
       resetRecordingUI();
     };
-    
+
     mediaRecorder.start();
     isRecordingVoice = true;
     recordingStartTime = Date.now();
-    
+
     updateRecordingUI();
-    
   } catch (err) {
     showToast(`Microphone access denied: ${err.message}`, "error");
   }
@@ -2619,11 +2653,11 @@ function cancelVoiceRecording() {
 function updateRecordingUI() {
   const btnRecordVoice = document.getElementById("btn-record-voice");
   const inputWrapper = document.querySelector(".chat-input-wrapper");
-  
+
   if (btnRecordVoice) {
     btnRecordVoice.classList.add("recording");
   }
-  
+
   if (inputWrapper) {
     inputWrapper.innerHTML = `
       <div class="voice-recording-ui">
@@ -2641,7 +2675,7 @@ function updateRecordingUI() {
       </div>
     `;
   }
-  
+
   // Update recording time
   recordingTimer = setInterval(() => {
     const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
@@ -2657,16 +2691,16 @@ function updateRecordingUI() {
 function resetRecordingUI() {
   const btnRecordVoice = document.getElementById("btn-record-voice");
   const inputWrapper = document.querySelector(".chat-input-wrapper");
-  
+
   if (btnRecordVoice) {
     btnRecordVoice.classList.remove("recording");
   }
-  
+
   if (inputWrapper) {
     inputWrapper.innerHTML = `
       <input type="text" id="chat-message-input" class="chat-message-input" placeholder="Type a message" />
     `;
-    
+
     // Re-attach event listener
     const messageInput = document.getElementById("chat-message-input");
     if (messageInput) {
@@ -2689,16 +2723,20 @@ async function attachFile() {
   try {
     const result = await window.api.selectFileToSend();
     if (result.canceled) return;
-    
+
     const filePath = result.filePath;
     const fileName = result.fileName;
-    
+
     // Ask for optional caption
     const caption = ""; // Could prompt user for caption
-    
+
     showToast(`Sending ${fileName}...`, "info");
-    
-    const sendResult = await window.api.sendFileMessage(currentChatId, filePath, caption);
+
+    const sendResult = await window.api.sendFileMessage(
+      currentChatId,
+      filePath,
+      caption,
+    );
     if (sendResult.error) {
       showToast(`Failed to send file: ${sendResult.error}`, "error");
     } else {
@@ -2712,7 +2750,7 @@ async function attachFile() {
 function addSentMessageToList(msgInfo) {
   const fileList = document.getElementById("file-list");
   if (!fileList) return;
-  
+
   // Create file object from message info
   const file = {
     messageId: msgInfo.messageId,
@@ -2726,20 +2764,20 @@ function addSentMessageToList(msgInfo) {
     isDownloaded: false,
     isUnread: false,
   };
-  
+
   // Add to currentFiles
   currentFiles.push(file);
-  
+
   // Render and append the new message at the bottom
   const html = renderFileItem(file);
   fileList.insertAdjacentHTML("beforeend", html);
-  
+
   // Scroll to bottom
   fileList.scrollTop = fileList.scrollHeight;
-  
+
   // Attach event listeners to the new element
   attachFileEventListeners(fileList);
-  
+
   // Update file count
   document.getElementById("file-count").textContent =
     `${currentFiles.length} file${currentFiles.length !== 1 ? "s" : ""}`;
