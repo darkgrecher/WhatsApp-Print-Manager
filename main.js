@@ -376,7 +376,7 @@ async function launchWithCommandTemplate(commandTemplate, filePaths) {
     "opera.exe",
   ]);
   const isOperaLauncher = exeName === "launcher.exe" && /opera/i.test(exePath);
-  const isල් = exeName === "acrobat.exe";
+  const is = exeName === "acrobat.exe";
 
   const buildArgsForPaths = (paths) => {
     const quotedFileArgs = paths.map((fp) => `"${fp}"`);
