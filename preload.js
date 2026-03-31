@@ -51,6 +51,8 @@ contextBridge.exposeInMainWorld("api", {
   // ── File Actions ──
   openDownloadsFolder: () => ipcRenderer.invoke("open-downloads-folder"),
   openFile: (filePath) => ipcRenderer.invoke("open-file", filePath),
+  openWithDialog: (filePath) =>
+    ipcRenderer.invoke("open-with-dialog", filePath),
   getOpenWithApps: (filePath) =>
     ipcRenderer.invoke("get-open-with-apps", filePath),
   openFilesWithApp: (data) => ipcRenderer.invoke("open-files-with-app", data),

@@ -1244,7 +1244,7 @@ function renderFileItem(file) {
         ${
           file.isDownloaded
             ? `<button class="btn-file-action" data-action="open-file" data-path="${escapeHtml(file.localPath)}">Open</button>
-             `
+               <button class="btn-crowbar" data-action="open-with-dialog" data-path="${escapeHtml(file.localPath)}" title="Choose app...">🔧</button>`
             : `<button class="btn-file-action download" data-action="download-file" data-msg-id="${escapeHtml(file.messageId)}" data-filename="${escapeHtml(file.fileName)}">⬇️ Download</button>`
         }
       </div>
@@ -1329,6 +1329,9 @@ function handleFileAction(e) {
       break;
     case "download-file":
       downloadSingleFile(el.dataset.msgId, el.dataset.filename);
+      break;
+    case "open-with-dialog":
+      openWithDialog(el.dataset.path);
       break;
   }
 }
@@ -1807,6 +1810,17 @@ async function openFile(filePath) {
   await openFilesWithAppSelection([filePath], selectedOpenWithApp, {
     showSuccessToast: false,
   });
+}
+
+async function openWithDialog(filePath) {
+  try {
+    const result = await window.api.openWithDialog(filePath);
+    if (result.error) {
+      showToast(result.error, "error");
+    }
+  } catch (err) {
+    showToast("Failed to open selection dialog", "error");
+  }
 }
 
 function openDownloadsFolder() {

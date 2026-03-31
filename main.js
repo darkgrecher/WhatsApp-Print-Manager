@@ -1834,6 +1834,19 @@ ipcMain.handle("open-file", async (event, filePath) => {
   return { error: "File not found" };
 });
 
+// Open Windows "Open With" dialog for a single file
+ipcMain.handle("open-with-dialog", async (event, filePath) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) {
+      return { error: "File not found" };
+    }
+    await launchWindowsOpenWithDialog(filePath);
+    return { success: true };
+  } catch (error) {
+    return { error: error.message || "Failed to open dialog" };
+  }
+});
+
 ipcMain.handle("get-open-with-apps", async (event, filePath) => {
   try {
     if (!filePath || !fs.existsSync(filePath)) {
