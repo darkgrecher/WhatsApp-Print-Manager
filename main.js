@@ -22,6 +22,13 @@ const enrichedChatCache = new Map();
 let enrichmentInProgress = false;
 const openWithSessions = new Map();
 
+// Detached frame recovery tracking
+let detachedFrameCount = 0;
+let lastDetachedFrameTime = 0;
+const DETACHED_FRAME_THRESHOLD = 5; // Trigger recovery after 5 consecutive detached frame errors
+const DETACHED_FRAME_WINDOW = 30000; // Within 30 seconds
+let isRecovering = false;
+
 // License server URL (change this to your production backend URL)
 const LICENSE_API_URL = "https://whatsapp-print-admin.vercel.app/api";
 
@@ -576,6 +583,51 @@ function createWindow() {
   }
 }
 
+// ── WhatsApp Recovery ────────────────────────────────────────────────────────
+async function triggerWhatsAppRecovery() {
+  if (isRecovering) {
+    console.warn("[Recovery] Already recovering, skipping duplicate request");
+    return;
+  }
+  
+  isRecovering = true;
+  console.log("[Recovery] Starting WhatsApp client recovery...");
+  
+  try {
+    // Notify UI that recovery is starting
+    mainWindow?.webContents.send("whatsapp:status", "recovering");
+    
+    // Mark client as not ready
+    isClientReady = false;
+    
+    // Destroy the existing client
+    if (whatsappClient) {
+      try {
+        console.log("[Recovery] Destroying existing WhatsApp client...");
+        await whatsappClient.destroy();
+      } catch (err) {
+        console.warn("[Recovery] Error destroying client:", err.message);
+      }
+    }
+    
+    // Wait a bit for cleanup
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Reset detached frame counter
+    detachedFrameCount = 0;
+    lastDetachedFrameTime = 0;
+    
+    // Reinitialize WhatsApp
+    console.log("[Recovery] Reinitializing WhatsApp client...");
+    initWhatsApp();
+  } catch (err) {
+    console.error("[Recovery] Error during recovery:", err);
+    mainWindow?.webContents.send("whatsapp:status", "recovery_failed");
+  } finally {
+    isRecovering = false;
+  }
+}
+
 // ── WhatsApp Client ──────────────────────────────────────────────────────────
 function initWhatsApp(retryAttempt = 1) {
   const systemBrowser = findSystemBrowser();
@@ -895,15 +947,39 @@ async function waitForPageReady(timeoutMs = 25000) {
 async function retryOnDetachedFrame(fn, retries = 3) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      return await fn();
+      const result = await fn();
+      // Success - reset detached frame counter
+      detachedFrameCount = 0;
+      return result;
     } catch (err) {
       const isDetached =
         err && err.message && err.message.includes("detached Frame");
-      if (isDetached && attempt < retries) {
+      if (isDetached) {
+        const now = Date.now();
+        
+        // Reset counter if it's been a while since the last error
+        if (now - lastDetachedFrameTime > DETACHED_FRAME_WINDOW) {
+          detachedFrameCount = 0;
+        }
+        
+        detachedFrameCount++;
+        lastDetachedFrameTime = now;
+        
         console.warn(
-          `[Retry] Detached frame on attempt ${attempt}/${retries}, waiting for page to recover...`,
+          `[Retry] Detached frame on attempt ${attempt}/${retries} (total: ${detachedFrameCount}), waiting for page to recover...`,
         );
-        await waitForPageReady();
+        
+        // If we've hit the threshold, trigger recovery
+        if (detachedFrameCount >= DETACHED_FRAME_THRESHOLD && !isRecovering) {
+          console.error(`[Recovery] Detached frame threshold reached (${detachedFrameCount}). Triggering WhatsApp client recovery...`);
+          triggerWhatsAppRecovery();
+        }
+        
+        if (attempt < retries) {
+          await waitForPageReady();
+        } else {
+          throw err;
+        }
       } else {
         throw err;
       }
@@ -1442,8 +1518,9 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         }
 
         // 5. Resolve sender names for printable messages only
+        const ALLOWED_TYPES_FOR_SENDER = ["chat", "image", "document", "ptt", "audio"];
         const allWWJSMedia = serverMessages.filter(
-          (m) => m.hasMedia || PRINTABLE_TYPES.includes(m.type),
+          (m) => m.hasMedia || ALLOWED_TYPES_FOR_SENDER.includes(m.type),
         );
         for (const msg of allWWJSMedia) {
           try {

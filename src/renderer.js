@@ -228,6 +228,25 @@ function setupEventListeners() {
         stopInitTimer();
         validateLicense();
         break;
+      case "recovering":
+        if (badge) {
+          badge.textContent = "Recovering...";
+          badge.className = "badge";
+          badge.style.background = "#f59e0b";
+          badge.style.color = "white";
+        }
+        showToast("WhatsApp connection lost. Recovering automatically...", "warning");
+        break;
+      case "recovery_failed":
+        if (badge) {
+          badge.textContent = "Recovery Failed";
+          badge.className = "badge";
+          badge.style.background = "#dc2626";
+          badge.style.color = "white";
+        }
+        showToast("Automatic recovery failed. Please restart the app.", "error");
+        document.getElementById("btn-reconnect").classList.remove("hidden");
+        break;
       case "disconnected":
         if (badge) {
           badge.textContent = "Disconnected";
