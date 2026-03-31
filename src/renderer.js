@@ -509,6 +509,36 @@ function setupEventListeners() {
     // Pass isContainer so the badge is not bumped for album wrapper events.
     optimisticChatUpdate(data, isContainer);
 
+    // If we're currently viewing this chat and it has media, add it immediately
+    if (currentChatId === data.chatId && data.hasMedia) {
+      // Create file object from the incoming message data
+      const newFile = {
+        messageId: data.messageId,
+        chatId: data.chatId,
+        sender: data.sender,
+        fromMe: false,
+        timestamp: data.timestamp,
+        type: data.type,
+        body: data.body || "",
+        fileName: data.fileName || `${data.type}_${data.timestamp}.${mime.extension(data.mimeType || "application/octet-stream") || "bin"}`,
+        mimeType: data.mimeType,
+        fileSize: data.fileSize,
+        isDownloaded: data.autoDownloaded || false,
+        localPath: data.localPath || null,
+        isUnread: true,
+      };
+
+      // Add to currentFiles
+      currentFiles.push(newFile);
+
+      // Re-render the entire file list to maintain proper chronological order
+      renderFiles();
+
+      // Update file count
+      document.getElementById("file-count").textContent =
+        `${currentFiles.length} file${currentFiles.length !== 1 ? "s" : ""}`;
+    }
+
     // Debounced follow-up refresh: resets on every new message so only one
     // refresh fires 2s after the last message in a burst (e.g. 8 files).
     if (newMessageRefreshTimer) clearTimeout(newMessageRefreshTimer);
@@ -516,17 +546,6 @@ function setupEventListeners() {
       newMessageRefreshTimer = null;
       refreshChats();
     }, 2000);
-
-    // If we're currently viewing this chat, debounce file list reload so
-    // a burst of messages (e.g. 8 images) triggers only one reload after
-    // all messages have arrived and whatsapp-web.js has synced.
-    if (currentChatId === data.chatId && data.hasMedia) {
-      if (newMessageFileReloadTimer) clearTimeout(newMessageFileReloadTimer);
-      newMessageFileReloadTimer = setTimeout(() => {
-        newMessageFileReloadTimer = null;
-        selectChat(data.chatId, data.chatName || data.sender);
-      }, 2000);
-    }
   });
 }
 
