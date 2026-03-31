@@ -2088,6 +2088,130 @@ ipcMain.handle("mark-chat-read", async (event, chatId) => {
   }
 });
 
+// ── Send Messages ────────────────────────────────────────────────────────────
+
+// Send text message
+ipcMain.handle("send-text-message", async (event, chatId, message) => {
+  if (!isClientReady) return { error: "WhatsApp not ready" };
+  if (!chatId || !message) return { error: "Missing chatId or message" };
+  try {
+    const chat = await retryOnDetachedFrame(() =>
+      whatsappClient.getChatById(chatId),
+    );
+    const sentMsg = await retryOnDetachedFrame(() => chat.sendMessage(message));
+    
+    // Notify renderer about the sent message
+    const msgInfo = {
+      messageId: sentMsg.id._serialized,
+      chatId,
+      sender: null, // null = "You" in renderer
+      timestamp: sentMsg.timestamp || Math.floor(Date.now() / 1000),
+      type: "chat",
+      body: message,
+      fromMe: true,
+    };
+    mainWindow?.webContents.send("whatsapp:message-sent", msgInfo);
+    
+    return { success: true, messageId: sentMsg.id._serialized };
+  } catch (err) {
+    console.error("Error sending text message:", err);
+    return { error: err.message };
+  }
+});
+
+// Send voice message
+ipcMain.handle("send-voice-message", async (event, chatId, audioBase64) => {
+  if (!isClientReady) return { error: "WhatsApp not ready" };
+  if (!chatId || !audioBase64) return { error: "Missing chatId or audio data" };
+  try {
+    const chat = await retryOnDetachedFrame(() =>
+      whatsappClient.getChatById(chatId),
+    );
+    
+    // Create MessageMedia from base64 audio (ogg format for voice messages)
+    const media = new MessageMedia("audio/ogg; codecs=opus", audioBase64, "voice.ogg");
+    const sentMsg = await retryOnDetachedFrame(() => 
+      chat.sendMessage(media, { sendAudioAsVoice: true })
+    );
+    
+    // Notify renderer about the sent message
+    const msgInfo = {
+      messageId: sentMsg.id._serialized,
+      chatId,
+      sender: null,
+      timestamp: sentMsg.timestamp || Math.floor(Date.now() / 1000),
+      type: "ptt",
+      body: "",
+      fromMe: true,
+    };
+    mainWindow?.webContents.send("whatsapp:message-sent", msgInfo);
+    
+    return { success: true, messageId: sentMsg.id._serialized };
+  } catch (err) {
+    console.error("Error sending voice message:", err);
+    return { error: err.message };
+  }
+});
+
+// Send file message
+ipcMain.handle("send-file-message", async (event, chatId, filePath, caption) => {
+  if (!isClientReady) return { error: "WhatsApp not ready" };
+  if (!chatId || !filePath) return { error: "Missing chatId or file path" };
+  try {
+    if (!fs.existsSync(filePath)) {
+      return { error: "File not found" };
+    }
+    
+    const chat = await retryOnDetachedFrame(() =>
+      whatsappClient.getChatById(chatId),
+    );
+    
+    const media = MessageMedia.fromFilePath(filePath);
+    const sentMsg = await retryOnDetachedFrame(() => 
+      chat.sendMessage(media, { caption: caption || "" })
+    );
+    
+    // Notify renderer about the sent message
+    const msgInfo = {
+      messageId: sentMsg.id._serialized,
+      chatId,
+      sender: null,
+      timestamp: sentMsg.timestamp || Math.floor(Date.now() / 1000),
+      type: sentMsg.type || "document",
+      body: caption || "",
+      fileName: path.basename(filePath),
+      fromMe: true,
+    };
+    mainWindow?.webContents.send("whatsapp:message-sent", msgInfo);
+    
+    return { success: true, messageId: sentMsg.id._serialized };
+  } catch (err) {
+    console.error("Error sending file message:", err);
+    return { error: err.message };
+  }
+});
+
+// Select file to send (opens file dialog)
+ipcMain.handle("select-file-to-send", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Select file to send",
+    properties: ["openFile"],
+    filters: [
+      { name: "All Files", extensions: ["*"] },
+      { name: "Images", extensions: ["jpg", "jpeg", "png", "gif", "webp"] },
+      { name: "Documents", extensions: ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt"] },
+      { name: "Audio", extensions: ["mp3", "wav", "ogg", "m4a"] },
+      { name: "Video", extensions: ["mp4", "avi", "mov", "mkv"] },
+    ],
+  });
+  
+  if (result.canceled || !result.filePaths.length) {
+    return { canceled: true };
+  }
+  
+  return { filePath: result.filePaths[0], fileName: path.basename(result.filePaths[0]) };
+});
+
 // Refresh / reconnect WhatsApp
 ipcMain.handle("reconnect-whatsapp", async () => {
   try {

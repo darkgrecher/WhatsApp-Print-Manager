@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("whatsapp:file-auto-downloaded", (_, data) =>
       callback(data),
     ),
+  onMessageSent: (callback) =>
+    ipcRenderer.on("whatsapp:message-sent", (_, data) => callback(data)),
 
   // ── WhatsApp Actions ──
   getUnreadChats: () => ipcRenderer.invoke("get-unread-chats"),
@@ -43,6 +45,15 @@ contextBridge.exposeInMainWorld("api", {
   getProfileInfo: () => ipcRenderer.invoke("get-profile-info"),
   logoutWhatsApp: () => ipcRenderer.invoke("logout-whatsapp"),
   logoutAndRestart: () => ipcRenderer.invoke("logout-and-restart"),
+  
+  // ── Send Messages ──
+  sendTextMessage: (chatId, message) =>
+    ipcRenderer.invoke("send-text-message", chatId, message),
+  sendVoiceMessage: (chatId, audioBase64) =>
+    ipcRenderer.invoke("send-voice-message", chatId, audioBase64),
+  sendFileMessage: (chatId, filePath, caption) =>
+    ipcRenderer.invoke("send-file-message", chatId, filePath, caption),
+  selectFileToSend: () => ipcRenderer.invoke("select-file-to-send"),
 
   // ── Print Actions ──
   printWithSetup: (data) => ipcRenderer.invoke("print-with-setup", data),

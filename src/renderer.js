@@ -180,6 +180,9 @@ function setupButtonListeners() {
   const btnLicenseLogout = document.getElementById("btn-license-logout");
   if (btnLicenseLogout)
     btnLicenseLogout.addEventListener("click", () => licenseLogout());
+
+  // ── Chat Input Bar ──
+  setupChatInputBar();
 }
 
 function setupEventListeners() {
@@ -1196,6 +1199,11 @@ async function selectChat(chatId, chatName) {
 
   updateSelectionUI();
   loadDocumentThumbnails();
+  
+  // Scroll to bottom (newest messages)
+  setTimeout(() => {
+    fileList.scrollTop = fileList.scrollHeight;
+  }, 100);
 
   // Mark chat as read AFTER loading files (so unread tagging is accurate)
   window.api.markChatRead(chatId);
@@ -1223,7 +1231,9 @@ function renderFileItem(file) {
   const statusBadge = getStatusBadge(file);
   const safeMsgId = file.messageId.replace(/[^a-zA-Z0-9]/g, "_");
   const unreadClass = file.isUnread ? "file-unread" : "";
-  const senderName = file.sender || "You";
+  const isFromMe = !file.sender || file.fromMe;
+  const senderName = isFromMe ? "You" : file.sender;
+  const fromMeClass = isFromMe ? "from-me" : "";
 
   // For text messages (chat type), render as WhatsApp-style chat bubble
   const isChatMessage = file.type === "chat";
@@ -1231,7 +1241,7 @@ function renderFileItem(file) {
   if (isChatMessage) {
     const messageText = file.body || "(empty message)";
     return `
-      <div class="chat-bubble ${unreadClass}" data-message-id="${escapeHtml(file.messageId)}" id="file-${safeMsgId}">
+      <div class="chat-bubble ${fromMeClass} ${unreadClass}" data-message-id="${escapeHtml(file.messageId)}" id="file-${safeMsgId}">
         <div class="chat-bubble-sender">${escapeHtml(senderName)}</div>
         <div class="chat-bubble-text">${escapeHtml(messageText)}</div>
         <div class="chat-bubble-time">${time}</div>
@@ -1245,7 +1255,7 @@ function renderFileItem(file) {
   if (isVoiceMessage) {
     const audioSrc = file.isDownloaded ? `file:///${file.localPath.replace(/\\/g, "/")}` : "";
     return `
-      <div class="chat-bubble voice-bubble ${unreadClass}" data-message-id="${escapeHtml(file.messageId)}" id="file-${safeMsgId}">
+      <div class="chat-bubble voice-bubble ${fromMeClass} ${unreadClass}" data-message-id="${escapeHtml(file.messageId)}" id="file-${safeMsgId}">
         <div class="chat-bubble-sender">${escapeHtml(senderName)}</div>
         <div class="voice-message-content">
           <div class="voice-icon">🎤</div>
@@ -2282,17 +2292,28 @@ function getDateKey(timestamp) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function renderFilesGroupedByDate(files) {
+function renderFilesGroupedByDate(files, reverseOrder = true) {
+  // Sort files by timestamp (oldest first for WhatsApp-style display)
+  const sortedFiles = [...files].sort((a, b) => 
+    reverseOrder ? (a.timestamp || 0) - (b.timestamp || 0) : (b.timestamp || 0) - (a.timestamp || 0)
+  );
+  
   // Group files by date
   const groups = new Map();
-  for (const file of files) {
+  for (const file of sortedFiles) {
     const key = getDateKey(file.timestamp);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(file);
   }
 
   let html = "";
-  for (const [key, groupFiles] of groups) {
+  // Sort date keys (oldest first when reverseOrder is true)
+  const sortedKeys = [...groups.keys()].sort((a, b) => 
+    reverseOrder ? a.localeCompare(b) : b.localeCompare(a)
+  );
+  
+  for (const key of sortedKeys) {
+    const groupFiles = groups.get(key);
     const label = formatDateLabel(groupFiles[0].timestamp);
     html += `<div class="date-separator" data-date-key="${escapeHtml(key)}"><span class="date-separator-label">${escapeHtml(label)}</span></div>`;
     html += groupFiles.map(renderFileItem).join("");
@@ -2421,3 +2442,284 @@ function showToast(message, type = "info") {
     setTimeout(() => toast.remove(), 300);
   }, 4000);
 }
+
+// ── Chat Input Bar ───────────────────────────────────────────────────────
+let isRecordingVoice = false;
+let mediaRecorder = null;
+let audioChunks = [];
+let recordingStartTime = null;
+let recordingTimer = null;
+
+function setupChatInputBar() {
+  const messageInput = document.getElementById("chat-message-input");
+  const btnSend = document.getElementById("btn-send-message");
+  const btnRecordVoice = document.getElementById("btn-record-voice");
+  const btnAttachFile = document.getElementById("btn-attach-file");
+
+  if (messageInput) {
+    // Send on Enter key
+    messageInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendTextMessage();
+      }
+    });
+  }
+
+  if (btnSend) {
+    btnSend.addEventListener("click", () => sendTextMessage());
+  }
+
+  if (btnRecordVoice) {
+    btnRecordVoice.addEventListener("click", () => toggleVoiceRecording());
+  }
+
+  if (btnAttachFile) {
+    btnAttachFile.addEventListener("click", () => attachFile());
+  }
+
+  // Listen for sent messages
+  window.api.onMessageSent((msgInfo) => {
+    if (msgInfo.chatId === currentChatId) {
+      addSentMessageToList(msgInfo);
+    }
+  });
+}
+
+async function sendTextMessage() {
+  const messageInput = document.getElementById("chat-message-input");
+  const message = messageInput?.value?.trim();
+  
+  if (!message || !currentChatId) {
+    if (!currentChatId) showToast("Please select a chat first", "error");
+    return;
+  }
+
+  try {
+    messageInput.value = "";
+    messageInput.focus();
+    
+    const result = await window.api.sendTextMessage(currentChatId, message);
+    if (result.error) {
+      showToast(`Failed to send: ${result.error}`, "error");
+    }
+  } catch (err) {
+    showToast(`Error sending message: ${err.message}`, "error");
+  }
+}
+
+async function toggleVoiceRecording() {
+  if (isRecordingVoice) {
+    stopVoiceRecording();
+  } else {
+    startVoiceRecording();
+  }
+}
+
+async function startVoiceRecording() {
+  if (!currentChatId) {
+    showToast("Please select a chat first", "error");
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    
+    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
+    audioChunks = [];
+    
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        audioChunks.push(e.data);
+      }
+    };
+    
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(track => track.stop());
+      
+      if (audioChunks.length > 0) {
+        const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+          const base64Audio = reader.result.split(",")[1];
+          try {
+            const result = await window.api.sendVoiceMessage(currentChatId, base64Audio);
+            if (result.error) {
+              showToast(`Failed to send voice: ${result.error}`, "error");
+            }
+          } catch (err) {
+            showToast(`Error sending voice: ${err.message}`, "error");
+          }
+        };
+        reader.readAsDataURL(audioBlob);
+      }
+      
+      resetRecordingUI();
+    };
+    
+    mediaRecorder.start();
+    isRecordingVoice = true;
+    recordingStartTime = Date.now();
+    
+    updateRecordingUI();
+    
+  } catch (err) {
+    showToast(`Microphone access denied: ${err.message}`, "error");
+  }
+}
+
+function stopVoiceRecording() {
+  if (mediaRecorder && isRecordingVoice) {
+    mediaRecorder.stop();
+    isRecordingVoice = false;
+    if (recordingTimer) {
+      clearInterval(recordingTimer);
+      recordingTimer = null;
+    }
+  }
+}
+
+function cancelVoiceRecording() {
+  if (mediaRecorder && isRecordingVoice) {
+    audioChunks = []; // Clear chunks so nothing is sent
+    mediaRecorder.stop();
+    isRecordingVoice = false;
+    if (recordingTimer) {
+      clearInterval(recordingTimer);
+      recordingTimer = null;
+    }
+  }
+  resetRecordingUI();
+}
+
+function updateRecordingUI() {
+  const btnRecordVoice = document.getElementById("btn-record-voice");
+  const inputWrapper = document.querySelector(".chat-input-wrapper");
+  
+  if (btnRecordVoice) {
+    btnRecordVoice.classList.add("recording");
+  }
+  
+  if (inputWrapper) {
+    inputWrapper.innerHTML = `
+      <div class="voice-recording-ui">
+        <div class="voice-recording-indicator"></div>
+        <span class="voice-recording-time">0:00</span>
+        <div class="voice-recording-waveform">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <button class="btn-cancel-recording" onclick="cancelVoiceRecording()" title="Cancel">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    `;
+  }
+  
+  // Update recording time
+  recordingTimer = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+    const timeEl = document.querySelector(".voice-recording-time");
+    if (timeEl) {
+      timeEl.textContent = `${mins}:${secs.toString().padStart(2, "0")}`;
+    }
+  }, 1000);
+}
+
+function resetRecordingUI() {
+  const btnRecordVoice = document.getElementById("btn-record-voice");
+  const inputWrapper = document.querySelector(".chat-input-wrapper");
+  
+  if (btnRecordVoice) {
+    btnRecordVoice.classList.remove("recording");
+  }
+  
+  if (inputWrapper) {
+    inputWrapper.innerHTML = `
+      <input type="text" id="chat-message-input" class="chat-message-input" placeholder="Type a message" />
+    `;
+    
+    // Re-attach event listener
+    const messageInput = document.getElementById("chat-message-input");
+    if (messageInput) {
+      messageInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          sendTextMessage();
+        }
+      });
+    }
+  }
+}
+
+async function attachFile() {
+  if (!currentChatId) {
+    showToast("Please select a chat first", "error");
+    return;
+  }
+
+  try {
+    const result = await window.api.selectFileToSend();
+    if (result.canceled) return;
+    
+    const filePath = result.filePath;
+    const fileName = result.fileName;
+    
+    // Ask for optional caption
+    const caption = ""; // Could prompt user for caption
+    
+    showToast(`Sending ${fileName}...`, "info");
+    
+    const sendResult = await window.api.sendFileMessage(currentChatId, filePath, caption);
+    if (sendResult.error) {
+      showToast(`Failed to send file: ${sendResult.error}`, "error");
+    } else {
+      showToast(`Sent ${fileName}`, "success");
+    }
+  } catch (err) {
+    showToast(`Error attaching file: ${err.message}`, "error");
+  }
+}
+
+function addSentMessageToList(msgInfo) {
+  const fileList = document.getElementById("file-list");
+  if (!fileList) return;
+  
+  // Create file object from message info
+  const file = {
+    messageId: msgInfo.messageId,
+    chatId: msgInfo.chatId,
+    sender: null,
+    fromMe: true,
+    timestamp: msgInfo.timestamp,
+    type: msgInfo.type,
+    body: msgInfo.body || "",
+    fileName: msgInfo.fileName || null,
+    isDownloaded: false,
+    isUnread: false,
+  };
+  
+  // Add to currentFiles
+  currentFiles.push(file);
+  
+  // Render and append the new message at the bottom
+  const html = renderFileItem(file);
+  fileList.insertAdjacentHTML("beforeend", html);
+  
+  // Scroll to bottom
+  fileList.scrollTop = fileList.scrollHeight;
+  
+  // Attach event listeners to the new element
+  attachFileEventListeners(fileList);
+  
+  // Update file count
+  document.getElementById("file-count").textContent =
+    `${currentFiles.length} file${currentFiles.length !== 1 ? "s" : ""}`;
+}
+
+// Make cancelVoiceRecording available globally for onclick
+window.cancelVoiceRecording = cancelVoiceRecording;
