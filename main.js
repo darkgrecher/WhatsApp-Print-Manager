@@ -1152,6 +1152,7 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
     // has already loaded — no network, no Puppeteer serialization overhead.
     let storeMessages = [];
     let unreadCount = 0;
+    let chatName = null;
     const unreadMsgIds = new Set();
     try {
       const storeData = await whatsappClient.pupPage.evaluate((cid) => {
@@ -1159,6 +1160,9 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         if (!chat) return null;
         const allMsgs = chat.msgs?.getModelsArray?.() || [];
         const unreadCount = chat.unreadCount || 0;
+        
+        // Get chat contact name for fallback
+        const chatName = chat.name || chat.contact?.pushname || chat.contact?.name || chat.formattedTitle || null;
 
         // Compute unread IDs from ALL messages (text + media) so that
         // slice(-unreadCount) correctly identifies the last N messages
@@ -1179,24 +1183,35 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         return {
           unreadCount,
           unreadIds,
+          chatName,
           messages: allMsgs
             .filter((m) => m.hasMedia || ALLOWED_TYPES.includes(m.type))
-            .map((m) => ({
-              id: m.id?._serialized,
-              type: m.type || "chat",
-              timestamp: m.t || 0,
-              body: m.body || m.caption || "",
-              sender: m.notifyName || m.senderObj?.pushname || m.senderObj?.name || null,
-              fileName: m.filename || m.mediaFilename || null,
-              mimeType: m.mimetype || null,
-              fileSize: m.size || m.filesize || null,
-            })),
+            .map((m) => {
+              // For messages from others, try to get sender name from various sources
+              const isFromMe = m.id?.fromMe || m.fromMe;
+              let sender = null;
+              if (!isFromMe) {
+                sender = m.notifyName || m._data?.notifyName || m.senderObj?.pushname || m.senderObj?.name || m.pushName || m._data?.pushName || chatName;
+              }
+              return {
+                id: m.id?._serialized,
+                type: m.type || "chat",
+                timestamp: m.t || 0,
+                body: m.body || m.caption || "",
+                sender,
+                fromMe: isFromMe,
+                fileName: m.filename || m.mediaFilename || null,
+                mimeType: m.mimetype || null,
+                fileSize: m.size || m.filesize || null,
+              };
+            }),
         };
       }, chatId);
 
       if (storeData) {
         storeMessages = (storeData.messages || []).filter((m) => m.id);
         unreadCount = storeData.unreadCount;
+        chatName = storeData.chatName || null;
         // unreadIds from the store are already correctly computed from all msgs
         (storeData.unreadIds || []).forEach((id) => unreadMsgIds.add(id));
       }
@@ -1223,10 +1238,14 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
       const safeId = (raw.id || "").replace(/[^a-zA-Z0-9]/g, "_");
       const expectedPath = path.join(DOWNLOADS_DIR, `${safeId}_${fileName}`);
       const isDownloaded = fs.existsSync(expectedPath);
+      
+      // Determine sender - use "You" for messages you sent, otherwise try to get sender name
+      const senderName = raw.fromMe ? null : (raw.sender || chatName || "Unknown");
+      
       return {
         messageId: raw.id,
         chatId,
-        sender: raw.sender || raw.notifyName || raw.pushName || "Unknown",
+        sender: senderName,
         timestamp: raw.timestamp,
         type: raw.type,
         body: raw.body || "",
@@ -1242,10 +1261,14 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
 
     // Helper for whatsapp-web.js message objects (used in background fetch)
     function extractFileInfo(msg) {
+      // Determine sender - use null for messages you sent (renderer shows "You"), otherwise get sender name
+      const isFromMe = msg.id?.fromMe || msg.fromMe;
+      const senderName = isFromMe ? null : (msg._data?.notifyName || msg._data?.pushName || msg.author || chatName || "Unknown");
+      
       const info = {
         messageId: msg.id._serialized,
         chatId,
-        sender: msg._data?.notifyName || msg._data?.pushName || msg.author || "Unknown",
+        sender: senderName,
         timestamp: msg.timestamp,
         type: msg.type,
         body: msg.body || "",
