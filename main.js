@@ -1240,12 +1240,14 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
       const isDownloaded = fs.existsSync(expectedPath);
       
       // Determine sender - use "You" for messages you sent, otherwise try to get sender name
-      const senderName = raw.fromMe ? null : (raw.sender || chatName || "Unknown");
+      const isFromMe = raw.fromMe === true;
+      const senderName = isFromMe ? null : (raw.sender || chatName || "Unknown");
       
       return {
         messageId: raw.id,
         chatId,
         sender: senderName,
+        fromMe: isFromMe,
         timestamp: raw.timestamp,
         type: raw.type,
         body: raw.body || "",
@@ -1269,6 +1271,7 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         messageId: msg.id._serialized,
         chatId,
         sender: senderName,
+        fromMe: isFromMe || false,
         timestamp: msg.timestamp,
         type: msg.type,
         body: msg.body || "",
@@ -2120,7 +2123,7 @@ ipcMain.handle("send-text-message", async (event, chatId, message) => {
 });
 
 // Send voice message
-ipcMain.handle("send-voice-message", async (event, chatId, audioBase64) => {
+ipcMain.handle("send-voice-message", async (event, chatId, audioBase64, mimeType) => {
   if (!isClientReady) return { error: "WhatsApp not ready" };
   if (!chatId || !audioBase64) return { error: "Missing chatId or audio data" };
   try {
@@ -2128,8 +2131,15 @@ ipcMain.handle("send-voice-message", async (event, chatId, audioBase64) => {
       whatsappClient.getChatById(chatId),
     );
     
-    // Create MessageMedia from base64 audio (ogg format for voice messages)
-    const media = new MessageMedia("audio/ogg; codecs=opus", audioBase64, "voice.ogg");
+    // Clean up the mimeType - remove codecs suffix and use simple mime
+    let audioMime = mimeType || "audio/ogg";
+    // Strip codecs info (e.g., "audio/webm;codecs=opus" -> "audio/webm")
+    audioMime = audioMime.split(";")[0].trim();
+    
+    // Determine file extension based on mime
+    const ext = audioMime.includes("ogg") ? "ogg" : audioMime.includes("webm") ? "webm" : "ogg";
+    
+    const media = new MessageMedia(audioMime, audioBase64, `voice.${ext}`);
     const sentMsg = await retryOnDetachedFrame(() => 
       chat.sendMessage(media, { sendAudioAsVoice: true })
     );

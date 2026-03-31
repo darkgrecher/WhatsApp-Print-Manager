@@ -375,91 +375,23 @@ function setupEventListeners() {
         `${currentFiles.length} file${currentFiles.length !== 1 ? "s" : ""}`;
 
       const fileList = document.getElementById("file-list");
-      const batchUnread = files.filter((f) => f.isUnread);
-      const batchSeen = files.filter((f) => !f.isUnread);
 
-      // ── Unread files arriving via batch ─────────────────────────────────
-      // Happens when fetchMessages() surfaces a new message that was not yet
-      // in the WhatsApp Web memory store during Phase 1.
-      if (batchUnread.length > 0) {
-        // Auto-select downloaded unread files (same behaviour as Phase 1)
-        batchUnread
-          .filter((f) => f.isDownloaded)
-          .forEach((f) => selectedFiles.add(f.messageId));
+      // Auto-select downloaded unread files
+      const newUnread = files.filter((f) => f.isUnread && f.isDownloaded);
+      newUnread.forEach((f) => selectedFiles.add(f.messageId));
+      if (newUnread.length > 0) {
         updateSelectionUI();
-
-        const totalUnread = currentFiles.filter((f) => f.isUnread).length;
-        let newSectionFiles = fileList.querySelector(".new-section-files");
-
-        if (!newSectionFiles) {
-          // Phase 1 returned nothing unread — build the whole section now
-          const insertBefore =
-            fileList.querySelector(".older-files-loading") ||
-            fileList.querySelector(".seen-section");
-          const sectionHtml =
-            `<div class="file-section-header new-section">` +
-            `<span class="section-icon">🔔</span>` +
-            `<span>New Files (<span class="new-count">${totalUnread}</span>)</span>` +
-            `</div><div class="new-section-files"></div>`;
-          if (insertBefore) {
-            insertBefore.insertAdjacentHTML("beforebegin", sectionHtml);
-          } else {
-            fileList.insertAdjacentHTML("afterbegin", sectionHtml);
-          }
-          newSectionFiles = fileList.querySelector(".new-section-files");
-        } else {
-          const countEl = fileList.querySelector(".new-section .new-count");
-          if (countEl) countEl.textContent = totalUnread;
-        }
-
-        // Append into the isolated container so date keys stay within this
-        // section and don't accidentally merge into "Previously Seen".
-        appendFilesGrouped(batchUnread, newSectionFiles, null);
       }
 
-      // ── Seen (older) files arriving via batch ────────────────────────────
-      if (batchSeen.length > 0) {
-        const seenCount = currentFiles.filter((f) => !f.isUnread).length;
-        const hasNewSection = fileList.querySelector(".new-section");
-        let seenSectionFiles = fileList.querySelector(".seen-section-files");
-
-        if (!seenSectionFiles) {
-          if (hasNewSection) {
-            // Create the "Previously Seen" section with an isolated container
-            const loadingEl = fileList.querySelector(".older-files-loading");
-            const sectionHtml =
-              `<div class="file-section-header seen-section">` +
-              `<span class="section-icon">📂</span>` +
-              `<span>Previously Seen (<span class="seen-count">${seenCount}</span>)</span>` +
-              `</div><div class="seen-section-files"></div>`;
-            if (loadingEl) {
-              loadingEl.insertAdjacentHTML("beforebegin", sectionHtml);
-            } else {
-              fileList.insertAdjacentHTML("beforeend", sectionHtml);
-            }
-            seenSectionFiles = fileList.querySelector(".seen-section-files");
-          } else {
-            // No unread section — flat list, no header needed
-            const loadingEl = fileList.querySelector(".older-files-loading");
-            appendFilesGrouped(batchSeen, fileList, loadingEl);
-          }
-        } else {
-          const countEl = fileList.querySelector(".seen-section .seen-count");
-          if (countEl) countEl.textContent = seenCount;
-        }
-
-        if (seenSectionFiles) {
-          appendFilesGrouped(batchSeen, seenSectionFiles, null);
-        }
-      }
-
-      attachFileEventListeners(fileList);
+      // Re-render the entire message list in proper chronological order
+      // This ensures older messages appear at top and new at bottom
+      renderFiles();
     }
 
     // Remove loading indicator when done
     if (done) {
       const fileList = document.getElementById("file-list");
-      const loadingEl = fileList.querySelector(".older-files-loading");
+      const loadingEl = fileList.querySelector("#older-files-loading");
       if (loadingEl) loadingEl.remove();
 
       // If nothing loaded at all (no unread, no older), show empty state
@@ -1164,24 +1096,44 @@ async function selectChat(chatId, chatName) {
     unreadDownloaded.forEach((f) => selectedFiles.add(f.messageId));
   }
 
-  // Build initial HTML: unread files first, then loading indicator if older files coming
+  // Build initial HTML with WhatsApp-style chronological ordering
   let html = "";
 
-  if (unreadFiles.length > 0) {
-    html += `<div class="file-section-header new-section">
-      <span class="section-icon">🔔</span>
-      <span>New Files (<span class="new-count">${unreadFiles.length}</span>)</span>
-    </div>`;
-    // Wrap in an isolated container so batch-appended files don't bleed
-    // date-separator keys from this section into the "Previously Seen" section.
-    html += `<div class="new-section-files">${renderFilesGroupedByDate(unreadFiles)}</div>`;
+  // Sort messages chronologically (oldest first, newest at bottom)
+  const sortedFiles = [...unreadFiles].sort((a, b) => 
+    (a.timestamp || 0) - (b.timestamp || 0)
+  );
+
+  // Check if there are unread messages
+  const firstUnreadIndex = sortedFiles.findIndex((f) => f.isUnread);
+  const hasUnreadMessages = firstUnreadIndex !== -1;
+
+  let lastDateKey = null;
+  for (let i = 0; i < sortedFiles.length; i++) {
+    const file = sortedFiles[i];
+    const dateKey = getDateKey(file.timestamp);
+
+    // Add date separator when date changes
+    if (dateKey !== lastDateKey) {
+      const label = formatDateLabel(file.timestamp);
+      html += `<div class="date-separator" data-date-key="${escapeHtml(dateKey)}"><span class="date-separator-label">${escapeHtml(label)}</span></div>`;
+      lastDateKey = dateKey;
+    }
+
+    // Add unread divider before first unread message
+    if (hasUnreadMessages && i === firstUnreadIndex) {
+      html += `<div class="unread-divider" id="unread-divider"><span>Unread messages</span></div>`;
+    }
+
+    html += renderFileItem(file);
   }
 
   if (hasOlderFiles) {
-    html += `<div class="older-files-loading">
+    // Prepend loading indicator at the top (older messages load at top)
+    html = `<div class="older-files-loading" id="older-files-loading">
       <div class="spinner" style="width:20px;height:20px;border-width:2px"></div>
-      <span style="margin-left:8px;color:var(--text-secondary)">Loading older files...</span>
-    </div>`;
+      <span style="margin-left:8px;color:var(--text-secondary)">Loading older messages...</span>
+    </div>` + html;
   }
 
   fileList.innerHTML = html;
@@ -1200,9 +1152,14 @@ async function selectChat(chatId, chatName) {
   updateSelectionUI();
   loadDocumentThumbnails();
   
-  // Scroll to bottom (newest messages)
+  // Scroll to unread divider if present, otherwise to bottom (newest messages)
   setTimeout(() => {
-    fileList.scrollTop = fileList.scrollHeight;
+    const unreadDivider = document.getElementById("unread-divider");
+    if (unreadDivider) {
+      unreadDivider.scrollIntoView({ behavior: "auto", block: "start" });
+    } else {
+      fileList.scrollTop = fileList.scrollHeight;
+    }
   }, 100);
 
   // Mark chat as read AFTER loading files (so unread tagging is accurate)
@@ -1274,7 +1231,7 @@ function renderFileItem(file) {
   }
 
   return `
-    <div class="file-item ${isSelected} ${unreadClass}" data-message-id="${escapeHtml(file.messageId)}" id="file-${safeMsgId}">
+    <div class="file-item ${isSelected} ${unreadClass} ${fromMeClass}" data-message-id="${escapeHtml(file.messageId)}" id="file-${safeMsgId}">
       <input type="checkbox" class="file-checkbox" ${isChecked} 
         data-action="toggle-select" data-msg-id="${escapeHtml(file.messageId)}"
         ${!file.isDownloaded ? 'disabled title="Download first to select"' : ""} />
@@ -1337,32 +1294,50 @@ function attachFileEventListeners(container) {
 function renderFiles() {
   const fileList = document.getElementById("file-list");
 
-  const unreadFiles = currentFiles.filter((f) => f.isUnread);
-  const seenFiles = currentFiles.filter((f) => !f.isUnread);
+  // Sort ALL messages chronologically (oldest first, newest at bottom)
+  const sortedFiles = [...currentFiles].sort((a, b) => 
+    (a.timestamp || 0) - (b.timestamp || 0)
+  );
+
+  // Check if there are unread messages
+  const firstUnreadIndex = sortedFiles.findIndex((f) => f.isUnread);
+  const hasUnread = firstUnreadIndex !== -1;
 
   let html = "";
+  let lastDateKey = null;
 
-  if (unreadFiles.length > 0) {
-    html += `<div class="file-section-header new-section">`;
-    html += `<span class="section-icon">🔔</span>`;
-    html += `<span>New Files (<span class="new-count">${unreadFiles.length}</span>)</span>`;
-    html += `</div>`;
-    html += `<div class="new-section-files">${renderFilesGroupedByDate(unreadFiles)}</div>`;
-  }
+  for (let i = 0; i < sortedFiles.length; i++) {
+    const file = sortedFiles[i];
+    const dateKey = getDateKey(file.timestamp);
 
-  if (seenFiles.length > 0) {
-    if (unreadFiles.length > 0) {
-      html += `<div class="file-section-header seen-section">`;
-      html += `<span class="section-icon">📂</span>`;
-      html += `<span>Previously Seen (<span class="seen-count">${seenFiles.length}</span>)</span>`;
-      html += `</div>`;
+    // Add date separator when date changes
+    if (dateKey !== lastDateKey) {
+      const label = formatDateLabel(file.timestamp);
+      html += `<div class="date-separator" data-date-key="${escapeHtml(dateKey)}"><span class="date-separator-label">${escapeHtml(label)}</span></div>`;
+      lastDateKey = dateKey;
     }
-    html += `<div class="seen-section-files">${renderFilesGroupedByDate(seenFiles)}</div>`;
+
+    // Add unread divider before first unread message
+    if (hasUnread && i === firstUnreadIndex) {
+      html += `<div class="unread-divider" id="unread-divider"><span>Unread messages</span></div>`;
+    }
+
+    html += renderFileItem(file);
   }
 
   fileList.innerHTML = html;
   attachFileEventListeners(fileList);
   loadDocumentThumbnails();
+  
+  // Scroll to unread divider if present, otherwise to bottom
+  setTimeout(() => {
+    const unreadDivider = document.getElementById("unread-divider");
+    if (unreadDivider) {
+      unreadDivider.scrollIntoView({ behavior: "auto", block: "start" });
+    } else {
+      fileList.scrollTop = fileList.scrollHeight;
+    }
+  }, 100);
 }
 
 function handleFileAction(e) {
@@ -2525,7 +2500,16 @@ async function startVoiceRecording() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     
-    mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
+    // Try ogg/opus first (better WhatsApp compatibility), fall back to webm
+    let mimeType = "audio/ogg;codecs=opus";
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = "audio/webm;codecs=opus";
+    }
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = "audio/webm";
+    }
+    
+    mediaRecorder = new MediaRecorder(stream, { mimeType });
     audioChunks = [];
     
     mediaRecorder.ondataavailable = (e) => {
@@ -2538,14 +2522,16 @@ async function startVoiceRecording() {
       stream.getTracks().forEach(track => track.stop());
       
       if (audioChunks.length > 0) {
-        const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+        const audioBlob = new Blob(audioChunks, { type: mimeType });
         const reader = new FileReader();
         reader.onloadend = async () => {
           const base64Audio = reader.result.split(",")[1];
           try {
-            const result = await window.api.sendVoiceMessage(currentChatId, base64Audio);
+            const result = await window.api.sendVoiceMessage(currentChatId, base64Audio, mimeType);
             if (result.error) {
               showToast(`Failed to send voice: ${result.error}`, "error");
+            } else {
+              showToast("Voice message sent", "success");
             }
           } catch (err) {
             showToast(`Error sending voice: ${err.message}`, "error");

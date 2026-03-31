@@ -702,6 +702,13 @@ body {
   flex-direction: column;
 }
 
+/* Section containers for flexbox alignment */
+.new-section-files,
+.seen-section-files {
+  display: flex;
+  flex-direction: column;
+}
+
 /* Watermark behind file items */
 .file-list::before {
   content: "";
@@ -739,6 +746,14 @@ body {
   transition: var(--transition);
   cursor: pointer;
   user-select: none;
+  align-self: flex-start;
+  width: auto;
+  max-width: 85%;
+}
+
+.file-item.from-me {
+  align-self: flex-end;
+  margin-left: auto;
 }
 
 .file-item:hover {
@@ -788,6 +803,28 @@ body {
   align-items: center;
   justify-content: center;
   padding: 16px;
+}
+
+/* ── Unread Messages Divider (WhatsApp-style) ── */
+.unread-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 18px;
+  margin: 8px 0;
+}
+
+.unread-divider span {
+  display: inline-block;
+  padding: 6px 16px;
+  background: #1e7e34;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  letter-spacing: 0.3px;
+  user-select: none;
 }
 
 /* ── Date Separators (WhatsApp-style) ── */
@@ -890,20 +927,23 @@ body {
 
 /* ── WhatsApp-style Chat Bubbles ─────────────────────────────────────────── */
 .chat-bubble {
-  background: var(--wa-light-green);
+  background: #ffffff;
   border-radius: 8px;
   padding: 8px 12px;
   margin: 4px 0;
-  max-width: 85%;
+  max-width: 65%;
+  width: fit-content;
   position: relative;
   box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
   align-self: flex-start;
+  margin-right: auto;
 }
 
 .chat-bubble.from-me {
   background: #d9fdd3;
   align-self: flex-end;
   margin-left: auto;
+  margin-right: 0;
 }
 
 .chat-bubble.from-me .chat-bubble-sender {
@@ -911,7 +951,7 @@ body {
 }
 
 .chat-bubble.file-unread {
-  background: #c8f0b4;
+  background: #e7ffdb;
 }
 
 .chat-bubble-sender {

@@ -49,8 +49,8 @@ contextBridge.exposeInMainWorld("api", {
   // ── Send Messages ──
   sendTextMessage: (chatId, message) =>
     ipcRenderer.invoke("send-text-message", chatId, message),
-  sendVoiceMessage: (chatId, audioBase64) =>
-    ipcRenderer.invoke("send-voice-message", chatId, audioBase64),
+  sendVoiceMessage: (chatId, audioBase64, mimeType) =>
+    ipcRenderer.invoke("send-voice-message", chatId, audioBase64, mimeType),
   sendFileMessage: (chatId, filePath, caption) =>
     ipcRenderer.invoke("send-file-message", chatId, filePath, caption),
   selectFileToSend: () => ipcRenderer.invoke("select-file-to-send"),
