@@ -112,8 +112,8 @@ function setupButtonListeners() {
 
   updateOpenSelectedButtonLabel();
 
-  const fabDelete = document.getElementById("fab-delete");
-  if (fabDelete) fabDelete.addEventListener("click", () => deleteSelected());
+  const btnDelete = document.getElementById("btn-delete");
+  if (btnDelete) btnDelete.addEventListener("click", () => deleteSelected());
 
   // Sidebar initial refresh button
   const btnSidebarRefresh = document.getElementById("btn-sidebar-refresh");
@@ -467,7 +467,6 @@ function setupEventListeners() {
         if (actionsDiv) {
           actionsDiv.innerHTML = `
             <button class="btn-file-action" data-action="open-file" data-path="${escapeHtml(localPath)}">Open</button>
-            <button class="btn-crowbar" data-action="open-with-dialog" data-path="${escapeHtml(localPath)}" title="Choose app...">🔧</button>
           `;
         }
       }
@@ -1316,8 +1315,7 @@ function renderFileItem(file) {
       <div class="file-actions">
         ${
           file.isDownloaded
-            ? `<button class="btn-file-action" data-action="open-file" data-path="${escapeHtml(file.localPath)}">Open</button>
-               <button class="btn-crowbar" data-action="open-with-dialog" data-path="${escapeHtml(file.localPath)}" title="Choose app...">🔧</button>`
+            ? `<button class="btn-file-action" data-action="open-file" data-path="${escapeHtml(file.localPath)}">Open</button>`
             : `<button class="btn-file-action download" data-action="download-file" data-msg-id="${escapeHtml(file.messageId)}" data-filename="${escapeHtml(file.fileName)}">⬇️ Download</button>`
         }
       </div>
@@ -1421,9 +1419,6 @@ function handleFileAction(e) {
     case "download-file":
       downloadSingleFile(el.dataset.msgId, el.dataset.filename);
       break;
-    case "open-with-dialog":
-      openWithDialog(el.dataset.path);
-      break;
   }
 }
 
@@ -1518,15 +1513,13 @@ function toggleFileSelect(messageId) {
 }
 
 function updateSelectionUI() {
-  // Update floating delete FAB
-  const fab = document.getElementById("fab-delete");
-  if (fab) {
-    if (selectedFiles.size > 0) {
-      fab.classList.remove("hidden");
-      document.getElementById("fab-delete-count").textContent =
-        selectedFiles.size;
-    } else {
-      fab.classList.add("hidden");
+  // Update delete button
+  const btnDelete = document.getElementById("btn-delete");
+  const btnDeleteBadge = document.getElementById("btn-delete-badge");
+  if (btnDelete) {
+    btnDelete.classList.toggle("hidden", selectedFiles.size === 0);
+    if (btnDeleteBadge) {
+      btnDeleteBadge.textContent = selectedFiles.size.toString();
     }
   }
 
@@ -1534,6 +1527,12 @@ function updateSelectionUI() {
   const btnUnselectAll = document.getElementById("btn-unselect-all");
   if (btnUnselectAll) {
     btnUnselectAll.classList.toggle("hidden", selectedFiles.size === 0);
+  }
+
+  // Show open-with container only when files are selected
+  const openWithContainer = document.getElementById("open-with-container");
+  if (openWithContainer) {
+    openWithContainer.classList.toggle("hidden", selectedFiles.size === 0);
   }
 }
 
@@ -1867,9 +1866,9 @@ function closeChat() {
   selectedFiles.clear();
   hideOpenWithDropdown();
 
-  // Hide floating delete button
-  const fab = document.getElementById("fab-delete");
-  if (fab) fab.classList.add("hidden");
+  // Hide delete button
+  const btnDelete = document.getElementById("btn-delete");
+  if (btnDelete) btnDelete.classList.add("hidden");
 
   // Deselect active chat in sidebar
   document.querySelectorAll(".chat-item").forEach((el) => {
