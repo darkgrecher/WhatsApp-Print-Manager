@@ -480,10 +480,18 @@ function setupEventListeners() {
             <button class="btn-file-action" data-action="open-file" data-path="${escapeHtml(localPath)}">Open</button>
           `;
         }
+
+        if (file.type === "sticker" && file.localPath) {
+          const stickerContent = fileEl.querySelector(".sticker-message-content");
+          if (stickerContent) {
+            const stickerSrc = `file:///${file.localPath.replace(/\\/g, "/")}`;
+            stickerContent.innerHTML = `<img class="sticker-image" src="${escapeHtml(stickerSrc)}" alt="Sticker" loading="lazy" />`;
+          }
+        }
       }
 
       // Auto-select unread files (same behaviour as selectChat's initial render)
-      if (file.isUnread && !selectedFiles.has(messageId)) {
+      if (file.isUnread && isSelectableMediaFile(file) && !selectedFiles.has(messageId)) {
         selectedFiles.add(messageId);
         if (fileEl) {
           fileEl.classList.add("selected");
@@ -519,10 +527,11 @@ function setupEventListeners() {
     // it is not itself a countable message. Skip it (and any no-content
     // placeholder) to avoid the badge and tracker showing N+1.
     const isContainer = data.type === "album" || (!data.hasMedia && !data.body);
+    const hasDownloadableMedia = data.hasMedia && data.type !== "sticker";
 
     if (!isContainer) {
       showToast(
-        `New message from ${data.chatName || data.sender}${data.hasMedia ? " (has file)" : ""}`,
+        `New message from ${data.chatName || data.sender}${hasDownloadableMedia ? " (has file)" : ""}`,
         "info",
       );
     }
@@ -599,9 +608,11 @@ function optimisticChatUpdate(data, isContainer = false) {
     // Update last message preview (only for real messages, not containers)
     if (!isContainer) {
       const lastMsgEl = existing.querySelector(".chat-last-msg");
-      const preview = data.hasMedia
-        ? `📎 ${data.fileName || data.type || "File"}`
-        : data.body || "";
+      const preview = data.type === "sticker"
+        ? "Sticker"
+        : data.hasMedia
+          ? `📎 ${data.fileName || data.type || "File"}`
+          : data.body || "";
       if (lastMsgEl) {
         lastMsgEl.textContent = preview;
       } else if (preview) {
@@ -1231,7 +1242,7 @@ async function selectChat(chatId, chatName) {
   // Auto-select all unread files that are already downloaded BEFORE rendering
   // so the checkboxes and "selected" class are correct in the initial HTML.
   const unreadDownloaded = unreadFiles.filter(
-    (f) => f.isUnread && f.isDownloaded,
+    (f) => f.isUnread && f.isDownloaded && isSelectableMediaFile(f),
   );
   if (unreadDownloaded.length > 0) {
     unreadDownloaded.forEach((f) => selectedFiles.add(f.messageId));
@@ -1371,6 +1382,30 @@ function renderFileItem(file) {
           }
         </div>
         <div class="chat-bubble-time">${time}${size ? ` • ${size}` : ""}</div>
+      </div>
+    `;
+  }
+
+  // For stickers, show the sticker directly instead of a file card.
+  const isStickerMessage = file.type === "sticker";
+
+  if (isStickerMessage) {
+    const stickerSrc =
+      file.isDownloaded && file.localPath
+        ? `file:///${file.localPath.replace(/\\/g, "/")}`
+        : "";
+
+    return `
+      <div class="chat-bubble sticker-bubble ${fromMeClass} ${unreadClass}" data-message-id="${escapeHtml(file.messageId)}" id="file-${safeMsgId}">
+        <div class="chat-bubble-sender">${escapeHtml(senderName)}</div>
+        <div class="sticker-message-content">
+          ${
+            stickerSrc
+              ? `<img class="sticker-image" src="${escapeHtml(stickerSrc)}" alt="Sticker" loading="lazy" />`
+              : `<div class="sticker-fallback">Sticker</div>`
+          }
+        </div>
+        <div class="chat-bubble-time">${time}</div>
       </div>
     `;
   }
@@ -1541,6 +1576,12 @@ function getFileType(fileName) {
   if (ext === "pdf") return "pdf";
   if (imageExts.includes(ext)) return "image";
   return ext;
+}
+
+function isSelectableMediaFile(file) {
+  if (!file) return false;
+  const type = String(file.type || "").toLowerCase();
+  return !["chat", "ptt", "audio", "sticker"].includes(type);
 }
 
 function toggleFileSelect(messageId) {

@@ -1001,6 +1001,30 @@ body {
   padding: 6px 0;
 }
 
+/* Sticker bubble */
+.sticker-bubble {
+  background: #ffffff;
+  padding: 6px 8px;
+}
+
+.sticker-message-content {
+  margin-top: 4px;
+}
+
+.sticker-image {
+  width: 150px;
+  max-width: 45vw;
+  height: auto;
+  display: block;
+  border-radius: 10px;
+}
+
+.sticker-fallback {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 10px 12px;
+}
+
 .voice-icon {
   font-size: 24px;
   flex-shrink: 0;
