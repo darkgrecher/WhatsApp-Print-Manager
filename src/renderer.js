@@ -349,8 +349,7 @@ function setupEventListeners() {
         Object.assign(window._chatData[data.id], data);
       }
 
-      const chatData =
-        (window._chatData && window._chatData[data.id]) || data;
+      const chatData = (window._chatData && window._chatData[data.id]) || data;
       const displayNumber = getDisplayChatNumber(chatData);
       const displayName = getDisplayChatName(chatData, displayNumber);
 
@@ -373,7 +372,9 @@ function setupEventListeners() {
       if (data.profilePicUrl) {
         const avatarEl = el.querySelector(".chat-avatar");
         if (avatarEl) {
-          const initials = getInitials(displayName || displayNumber || chatData.name || "");
+          const initials = getInitials(
+            displayName || displayNumber || chatData.name || "",
+          );
           avatarEl.innerHTML = `<img src="${escapeHtml(data.profilePicUrl)}" alt="" onerror="this.parentElement.textContent='${initials}'">`;
         }
       }
