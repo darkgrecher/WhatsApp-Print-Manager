@@ -1420,8 +1420,7 @@ function renderFileItem(file) {
   return `
     <div class="file-item ${isSelected} ${unreadClass} ${fromMeClass}" data-message-id="${escapeHtml(file.messageId)}" id="file-${safeMsgId}">
       <input type="checkbox" class="file-checkbox" ${isChecked} 
-        data-action="toggle-select" data-msg-id="${escapeHtml(file.messageId)}"
-        ${!file.isDownloaded ? 'disabled title="Download first to select"' : ""} />
+        data-action="toggle-select" data-msg-id="${escapeHtml(file.messageId)}" />
       <div class="file-icon ${iconInfo.class}">${iconInfo.icon}</div>
       <div class="file-details">
         <div class="file-name" title="${escapeHtml(file.fileName || "Unknown file")}">${escapeHtml(file.fileName || "Unknown file")}</div>
@@ -1460,7 +1459,7 @@ function attachFileEventListeners(container) {
   container.querySelectorAll(".file-item").forEach((el) => {
     if (el.dataset.clickAttached) return;
     el.dataset.clickAttached = "1";
-    el.addEventListener("click", (e) => {
+    el.addEventListener("click", async (e) => {
       if (
         e.target.closest(".file-actions") ||
         e.target.closest(".file-checkbox")
@@ -1468,7 +1467,21 @@ function attachFileEventListeners(container) {
         return;
       const msgId = el.dataset.messageId;
       const file = currentFiles.find((f) => f.messageId === msgId);
-      if (file && file.isDownloaded) {
+      if (!file) return;
+
+      // If not downloaded, download first then select
+      if (!file.isDownloaded) {
+        await downloadSingleFile(msgId, file.fileName);
+        // After download, select the file
+        toggleFileSelect(msgId);
+        // Update checkbox state after re-render
+        const fileItem = document.getElementById(`file-${msgId.replace(/[^a-zA-Z0-9]/g, "_")}`);
+        if (fileItem) {
+          const checkbox = fileItem.querySelector(".file-checkbox");
+          if (checkbox) checkbox.checked = selectedFiles.has(msgId);
+        }
+      } else {
+        // If already downloaded, just toggle select
         toggleFileSelect(msgId);
         const checkbox = el.querySelector(".file-checkbox");
         if (checkbox) checkbox.checked = selectedFiles.has(msgId);
