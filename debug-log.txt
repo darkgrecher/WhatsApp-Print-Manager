@@ -1,0 +1,117 @@
+
+> whatsapp-print-app@3.0.0 start
+> electron .
+
+
+[Cleanup] Cleared GPU cache
+[WhatsApp] Using system browser: C:\Program Files\Google\Chrome\Application\chrome.exe
+[WhatsApp] Authenticated
+[WhatsApp] Client is ready
+[Files] START chatId=44328474906757@lid
+[Files] store read in 2ms ΓÇö 1 media msgs in memory, 0 unread IDs
+[Files] split: 0 unread, 1 older in memory
+[Files] returning Phase 1 at 3ms ΓÇö 0 unread, hasOlderFiles=true
+[Files] fetchMessages done in 423ms ΓÇö 100 server msgs
+Chat info - ID: 44328474906757@lid, Name: +94 77 354 3324, IsGroup: false, IsReadOnly: false, Contact: N/A
+Attempting voice send for chat 44328474906757@lid, audio size: 68704 chars, MIME options: audio/webm;codecs=opus, audio/webm, audio/ogg;codecs=opus, audio/ogg
+Creating MessageMedia with MIME: audio/webm;codecs=opus, filename: voice.webm, base64 length: 68704
+MessageMedia created successfully, media.mimetype: audio/webm;codecs=opus, media.filename: voice.webm
+Sending as voice message...
+Fallback: Sending as regular audio message...
+Voice send failed with MIME audio/webm;codecs=opus: t Details: t: t
+    at #evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\ExecutionContext.js:391:56)
+    at async ExecutionContext.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\ExecutionContext.js:277:16)
+    at async IsolatedWorld.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\IsolatedWorld.js:100:16)
+    at async CdpFrame.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\api\Frame.js:362:20)
+    at async CdpPage.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\api\Page.js:830:20)
+    at async Client.sendMessage (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\whatsapp-web.js\src\Client.js:1083:25)
+    at async retryOnDetachedFrame (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:950:22)
+    at async D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:2256:21
+    at async WebContents.<anonymous> (node:electron/js2c/browser_init:2:77963)
+Fallback audio send failed with MIME audio/webm;codecs=opus: t Details: t: t
+    at #evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\ExecutionContext.js:391:56)
+    at async ExecutionContext.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\ExecutionContext.js:277:16)
+    at async IsolatedWorld.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\IsolatedWorld.js:100:16)
+    at async CdpFrame.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\api\Frame.js:362:20)
+    at async CdpPage.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\api\Page.js:830:20)
+Creating MessageMedia with MIME: audio/webm, filename: voice.webm, base64 length: 68704
+MessageMedia created successfully, media.mimetype: audio/webm, media.filename: voice.webm
+Sending as voice message...
+    at async Client.sendMessage (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\whatsapp-web.js\src\Client.js:1083:25)
+    at async retryOnDetachedFrame (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:950:22)
+    at async D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:2271:21
+    at async WebContents.<anonymous> (node:electron/js2c/browser_init:2:77963)
+Voice send failed with MIME audio/webm: t Details: t: t
+Fallback: Sending as regular audio message...
+    at #evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\ExecutionContext.js:391:56)
+    at async ExecutionContext.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\ExecutionContext.js:277:16)
+    at async IsolatedWorld.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\IsolatedWorld.js:100:16)
+    at async CdpFrame.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\api\Frame.js:362:20)
+    at async CdpPage.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\api\Page.js:830:20)
+    at async Client.sendMessage (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\whatsapp-web.js\src\Client.js:1083:25)
+    at async retryOnDetachedFrame (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:950:22)
+    at async D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:2256:21
+    at async WebContents.<anonymous> (node:electron/js2c/browser_init:2:77963)
+Creating MessageMedia with MIME: audio/ogg;codecs=opus, filename: voice.ogg, base64 length: 68704
+Fallback audio send failed with MIME audio/webm: t Details: t: t
+    at #evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\ExecutionContext.js:391:56)
+    at async ExecutionContext.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\ExecutionContext.js:277:16)
+    at async IsolatedWorld.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\IsolatedWorld.js:100:16)
+    at async CdpFrame.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\api\Frame.js:362:20)
+    at async CdpPage.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\api\Page.js:830:20)
+MessageMedia created successfully, media.mimetype: audio/ogg;codecs=opus, media.filename: voice.ogg
+    at async Client.sendMessage (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\whatsapp-web.js\src\Client.js:1083:25)
+Sending as voice message...
+    at async retryOnDetachedFrame (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:950:22)
+    at async D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:2271:21
+    at async WebContents.<anonymous> (node:electron/js2c/browser_init:2:77963)
+Voice send failed with MIME audio/ogg;codecs=opus: t Details: t: t
+Fallback: Sending as regular audio message...
+    at #evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\ExecutionContext.js:391:56)
+    at async ExecutionContext.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\ExecutionContext.js:277:16)
+    at async IsolatedWorld.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\IsolatedWorld.js:100:16)
+    at async CdpFrame.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\api\Frame.js:362:20)
+    at async CdpPage.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\api\Page.js:830:20)
+    at async Client.sendMessage (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\whatsapp-web.js\src\Client.js:1083:25)
+    at async retryOnDetachedFrame (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:950:22)
+    at async D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:2256:21
+    at async WebContents.<anonymous> (node:electron/js2c/browser_init:2:77963)
+Creating MessageMedia with MIME: audio/ogg, filename: voice.ogg, base64 length: 68704
+Fallback audio send failed with MIME audio/ogg;codecs=opus: t Details: t: t
+    at #evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\ExecutionContext.js:391:56)
+    at async ExecutionContext.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\ExecutionContext.js:277:16)
+    at async IsolatedWorld.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\IsolatedWorld.js:100:16)
+    at async CdpFrame.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\api\Frame.js:362:20)
+    at async CdpPage.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\api\Page.js:830:20)
+    at async Client.sendMessage (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\whatsapp-web.js\src\Client.js:1083:25)
+    at async retryOnDetachedFrame (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:950:22)
+    at async D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:2271:21
+    at async WebContents.<anonymous> (node:electron/js2c/browser_init:2:77963)
+MessageMedia created successfully, media.mimetype: audio/ogg, media.filename: voice.ogg
+Sending as voice message...
+Fallback: Sending as regular audio message...
+Voice send failed with MIME audio/ogg: t Details: t: t
+    at #evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\ExecutionContext.js:391:56)
+    at async ExecutionContext.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\ExecutionContext.js:277:16)
+    at async IsolatedWorld.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\IsolatedWorld.js:100:16)
+    at async CdpFrame.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\api\Frame.js:362:20)
+    at async CdpPage.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\api\Page.js:830:20)
+    at async Client.sendMessage (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\whatsapp-web.js\src\Client.js:1083:25)
+    at async retryOnDetachedFrame (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:950:22)
+    at async D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:2256:21
+    at async WebContents.<anonymous> (node:electron/js2c/browser_init:2:77963)
+Fallback audio send failed with MIME audio/ogg: t Details: t: t
+Last resort: attempting to send as plain audio file...
+    at #evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\ExecutionContext.js:391:56)
+    at async ExecutionContext.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\ExecutionContext.js:277:16)
+    at async IsolatedWorld.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\cdp\IsolatedWorld.js:100:16)
+    at async CdpFrame.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\api\Frame.js:362:20)
+    at async CdpPage.evaluate (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\puppeteer-core\lib\cjs\puppeteer\api\Page.js:830:20)
+    at async Client.sendMessage (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\node_modules\whatsapp-web.js\src\Client.js:1083:25)
+    at async retryOnDetachedFrame (D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:950:22)
+    at async D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:2271:21
+    at async WebContents.<anonymous> (node:electron/js2c/browser_init:2:77963)
+Last resort also failed: t
+Error sending voice message: Error: WhatsApp Web validation failed. Try: 1) Refresh the app, 2) Check your internet, 3) Re-scan QR code
+    at D:\Application files - Do not delete\github\WhatsApp-Print-Manager\main.js:2315:15
+    at async WebContents.<anonymous> (node:electron/js2c/browser_init:2:77963)

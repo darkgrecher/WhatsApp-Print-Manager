@@ -2203,23 +2203,118 @@ ipcMain.handle("send-text-message", async (event, chatId, message) => {
 ipcMain.handle("send-voice-message", async (event, chatId, audioBase64, mimeType) => {
   if (!isClientReady) return { error: "WhatsApp not ready" };
   if (!chatId || !audioBase64) return { error: "Missing chatId or audio data" };
+  
+  // Validate audio base64 data
+  if (typeof audioBase64 !== "string" || audioBase64.length === 0) {
+    return { error: "Audio data is invalid or empty" };
+  }
+  
   try {
     const chat = await retryOnDetachedFrame(() =>
       whatsappClient.getChatById(chatId),
     );
     
-    // Clean up the mimeType - remove codecs suffix and use simple mime
-    let audioMime = mimeType || "audio/ogg";
-    // Strip codecs info (e.g., "audio/webm;codecs=opus" -> "audio/webm")
-    audioMime = audioMime.split(";")[0].trim();
+    // Log chat details for debugging
+    console.log(`Chat info - ID: ${chatId}, Name: ${chat.name}, IsGroup: ${chat.isGroup}, IsReadOnly: ${chat.isReadOnly}, Contact: ${chat.contact?.name || "N/A"}`);
+
+    // Try the provided MIME first, then common voice-safe fallbacks.
+    const inputMime = String(mimeType || "").trim();
+    const strippedMime = inputMime ? inputMime.split(";")[0].trim() : "";
+    const mimeCandidates = [
+      inputMime,
+      strippedMime,
+      "audio/ogg;codecs=opus",
+      "audio/ogg",
+      "audio/webm;codecs=opus",
+      "audio/webm",
+    ].filter(Boolean);
+
+    // Deduplicate while preserving order.
+    const uniqueMimes = [...new Set(mimeCandidates)];
     
-    // Determine file extension based on mime
-    const ext = audioMime.includes("ogg") ? "ogg" : audioMime.includes("webm") ? "webm" : "ogg";
-    
-    const media = new MessageMedia(audioMime, audioBase64, `voice.${ext}`);
-    const sentMsg = await retryOnDetachedFrame(() => 
-      chat.sendMessage(media, { sendAudioAsVoice: true })
-    );
+    console.log(`Attempting voice send for chat ${chatId}, audio size: ${audioBase64.length} chars, MIME options: ${uniqueMimes.join(", ")}`);
+
+    let sentMsg = null;
+    let lastError = null;
+
+    for (const candidateMime of uniqueMimes) {
+      const ext = candidateMime.includes("ogg")
+        ? "ogg"
+        : candidateMime.includes("webm")
+          ? "webm"
+          : "ogg";
+
+      console.log(`Creating MessageMedia with MIME: ${candidateMime}, filename: voice.${ext}, base64 length: ${audioBase64.length}`);
+      
+      try {
+        const media = new MessageMedia(candidateMime, audioBase64, `voice.${ext}`);
+        console.log(`MessageMedia created successfully, media.mimetype: ${media.mimetype}, media.filename: ${media.filename}`);
+
+        // Prefer true WhatsApp voice-note mode first.
+        try {
+          console.log(`Sending as voice message...`);
+          sentMsg = await retryOnDetachedFrame(() =>
+            chat.sendMessage(media, { sendAudioAsVoice: true }),
+          );
+          console.log(`✓ Voice send succeeded!`);
+          break;
+        } catch (voiceErr) {
+          lastError = voiceErr;
+          const voiceDetails = voiceErr?.stack || JSON.stringify(voiceErr) || String(voiceErr);
+          console.warn(`Voice send failed with MIME ${candidateMime}:`, voiceErr?.message || voiceErr, "Details:", voiceDetails);
+        }
+
+        // Fallback: some environments cannot encode a valid PTT payload.
+        // Send as regular audio so message is not lost.
+        try {
+          console.log(`Fallback: Sending as regular audio message...`);
+          sentMsg = await retryOnDetachedFrame(() =>
+            chat.sendMessage(media, { sendAudioAsVoice: false }),
+          );
+          console.log(`✓ Audio fallback send succeeded!`);
+          break;
+        } catch (audioErr) {
+          lastError = audioErr;
+          const audioDetails = audioErr?.stack || JSON.stringify(audioErr) || String(audioErr);
+          console.warn(`Fallback audio send failed with MIME ${candidateMime}:`, audioErr?.message || audioErr, "Details:", audioDetails);
+        }
+      } catch (mediaErr) {
+        console.error(`Failed to create MessageMedia:`, mediaErr?.message || mediaErr);
+        lastError = mediaErr;
+      }
+    }
+
+    if (!sentMsg) {
+      // Extract meaningful error from lastError
+      let errorMsg = "Could not send voice message";
+      if (lastError) {
+        const orig = lastError?.message || String(lastError) || "";
+        if (orig === "t" || orig === "t: t") {
+          // WhatsApp Web API error - likely session/auth/rate limit issue
+          errorMsg = "WhatsApp Web validation failed. Try: 1) Refresh the app, 2) Check your internet, 3) Re-scan QR code";
+        } else {
+          errorMsg = orig || errorMsg;
+        }
+      }
+      
+      // Last resort: try sending as a plain audio file without voice options
+      console.log("Last resort: attempting to send as plain audio file...");
+      try {
+        const lastMime = uniqueMimes[uniqueMimes.length - 1] || "audio/webm";
+        const ext = lastMime.includes("ogg") ? "ogg" : "webm";
+        const plainMedia = new MessageMedia(lastMime, audioBase64, `audio.${ext}`);
+        sentMsg = await retryOnDetachedFrame(() =>
+          chat.sendMessage(plainMedia),
+        );
+        console.log("✓ Plain audio file send succeeded!");
+      } catch (plainErr) {
+        console.error("Last resort also failed:", plainErr?.message);
+      }
+      
+      if (!sentMsg) {
+        throw new Error(errorMsg);
+      }
+    }
     
     // Notify renderer about the sent message
     const msgInfo = {
@@ -2227,7 +2322,7 @@ ipcMain.handle("send-voice-message", async (event, chatId, audioBase64, mimeType
       chatId,
       sender: null,
       timestamp: sentMsg.timestamp || Math.floor(Date.now() / 1000),
-      type: "ptt",
+      type: sentMsg.type || "ptt",
       body: "",
       fromMe: true,
     };
@@ -2236,7 +2331,9 @@ ipcMain.handle("send-voice-message", async (event, chatId, audioBase64, mimeType
     return { success: true, messageId: sentMsg.id._serialized };
   } catch (err) {
     console.error("Error sending voice message:", err);
-    return { error: err.message };
+    // Extract error details more carefully
+    const errorMessage = err?.message || (err && String(err)) || "Failed to send voice message";
+    return { error: errorMessage };
   }
 });
 

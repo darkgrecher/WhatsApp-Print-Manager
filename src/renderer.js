@@ -2613,17 +2613,23 @@ function showToast(message, type = "info") {
   }, 4000);
 }
 
-// ── Chat Input Bar ───────────────────────────────────────────────────────
-let isRecordingVoice = false;
-let mediaRecorder = null;
-let audioChunks = [];
-let recordingStartTime = null;
-let recordingTimer = null;
+function normalizeErrorMessage(errorValue, fallback = "Unknown error") {
+  if (typeof errorValue === "string") {
+    const msg = errorValue.trim();
+    if (msg.length >= 3) return msg;
+    return fallback;
+  }
+  if (errorValue && typeof errorValue.message === "string") {
+    const msg = errorValue.message.trim();
+    return msg || fallback;
+  }
+  return fallback;
+}
 
+// ── Chat Input Bar ───────────────────────────────────────────────────────
 function setupChatInputBar() {
   const messageInput = document.getElementById("chat-message-input");
   const btnSend = document.getElementById("btn-send-message");
-  const btnRecordVoice = document.getElementById("btn-record-voice");
   const btnAttachFile = document.getElementById("btn-attach-file");
 
   if (messageInput) {
@@ -2638,10 +2644,6 @@ function setupChatInputBar() {
 
   if (btnSend) {
     btnSend.addEventListener("click", () => sendTextMessage());
-  }
-
-  if (btnRecordVoice) {
-    btnRecordVoice.addEventListener("click", () => toggleVoiceRecording());
   }
 
   if (btnAttachFile) {
@@ -2675,168 +2677,6 @@ async function sendTextMessage() {
     }
   } catch (err) {
     showToast(`Error sending message: ${err.message}`, "error");
-  }
-}
-
-async function toggleVoiceRecording() {
-  if (isRecordingVoice) {
-    stopVoiceRecording();
-  } else {
-    startVoiceRecording();
-  }
-}
-
-async function startVoiceRecording() {
-  if (!currentChatId) {
-    showToast("Please select a chat first", "error");
-    return;
-  }
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-    // Try ogg/opus first (better WhatsApp compatibility), fall back to webm
-    let mimeType = "audio/ogg;codecs=opus";
-    if (!MediaRecorder.isTypeSupported(mimeType)) {
-      mimeType = "audio/webm;codecs=opus";
-    }
-    if (!MediaRecorder.isTypeSupported(mimeType)) {
-      mimeType = "audio/webm";
-    }
-
-    mediaRecorder = new MediaRecorder(stream, { mimeType });
-    audioChunks = [];
-
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        audioChunks.push(e.data);
-      }
-    };
-
-    mediaRecorder.onstop = async () => {
-      stream.getTracks().forEach((track) => track.stop());
-
-      if (audioChunks.length > 0) {
-        const audioBlob = new Blob(audioChunks, { type: mimeType });
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-          const base64Audio = reader.result.split(",")[1];
-          try {
-            const result = await window.api.sendVoiceMessage(
-              currentChatId,
-              base64Audio,
-              mimeType,
-            );
-            if (result.error) {
-              showToast(`Failed to send voice: ${result.error}`, "error");
-            } else {
-              showToast("Voice message sent", "success");
-            }
-          } catch (err) {
-            showToast(`Error sending voice: ${err.message}`, "error");
-          }
-        };
-        reader.readAsDataURL(audioBlob);
-      }
-
-      resetRecordingUI();
-    };
-
-    mediaRecorder.start();
-    isRecordingVoice = true;
-    recordingStartTime = Date.now();
-
-    updateRecordingUI();
-  } catch (err) {
-    showToast(`Microphone access denied: ${err.message}`, "error");
-  }
-}
-
-function stopVoiceRecording() {
-  if (mediaRecorder && isRecordingVoice) {
-    mediaRecorder.stop();
-    isRecordingVoice = false;
-    if (recordingTimer) {
-      clearInterval(recordingTimer);
-      recordingTimer = null;
-    }
-  }
-}
-
-function cancelVoiceRecording() {
-  if (mediaRecorder && isRecordingVoice) {
-    audioChunks = []; // Clear chunks so nothing is sent
-    mediaRecorder.stop();
-    isRecordingVoice = false;
-    if (recordingTimer) {
-      clearInterval(recordingTimer);
-      recordingTimer = null;
-    }
-  }
-  resetRecordingUI();
-}
-
-function updateRecordingUI() {
-  const btnRecordVoice = document.getElementById("btn-record-voice");
-  const inputWrapper = document.querySelector(".chat-input-wrapper");
-
-  if (btnRecordVoice) {
-    btnRecordVoice.classList.add("recording");
-  }
-
-  if (inputWrapper) {
-    inputWrapper.innerHTML = `
-      <div class="voice-recording-ui">
-        <div class="voice-recording-indicator"></div>
-        <span class="voice-recording-time">0:00</span>
-        <div class="voice-recording-waveform">
-          <span></span><span></span><span></span><span></span><span></span>
-        </div>
-        <button class="btn-cancel-recording" onclick="cancelVoiceRecording()" title="Cancel">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
-      </div>
-    `;
-  }
-
-  // Update recording time
-  recordingTimer = setInterval(() => {
-    const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
-    const mins = Math.floor(elapsed / 60);
-    const secs = elapsed % 60;
-    const timeEl = document.querySelector(".voice-recording-time");
-    if (timeEl) {
-      timeEl.textContent = `${mins}:${secs.toString().padStart(2, "0")}`;
-    }
-  }, 1000);
-}
-
-function resetRecordingUI() {
-  const btnRecordVoice = document.getElementById("btn-record-voice");
-  const inputWrapper = document.querySelector(".chat-input-wrapper");
-
-  if (btnRecordVoice) {
-    btnRecordVoice.classList.remove("recording");
-  }
-
-  if (inputWrapper) {
-    inputWrapper.innerHTML = `
-      <input type="text" id="chat-message-input" class="chat-message-input" placeholder="Type a message" />
-    `;
-
-    // Re-attach event listener
-    const messageInput = document.getElementById("chat-message-input");
-    if (messageInput) {
-      messageInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !e.shiftKey) {
-          e.preventDefault();
-          sendTextMessage();
-        }
-      });
-    }
   }
 }
 
