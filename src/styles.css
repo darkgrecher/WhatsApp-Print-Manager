@@ -707,12 +707,16 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: 16px 24px;
-  padding-bottom: 80px; /* Space for chat input bar */
+  padding-bottom: 16px;
   background: var(--bg-primary);
   min-height: 0;
   position: relative;
   display: flex;
   flex-direction: column;
+}
+
+.file-list > :last-child {
+  margin-bottom: 0;
 }
 
 /* Section containers for flexbox alignment */
