@@ -410,9 +410,11 @@ body {
 }
 
 .files-search-container {
-  flex: 1;
+  display: flex;
+  justify-content: center;
   max-width: 280px;
   min-width: 160px;
+  width: 100%;
 }
 
 .search-bar-files {
@@ -599,14 +601,14 @@ body {
 
 /* ── Files Header ────────────────────────────────────────────────────────── */
 .files-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  justify-content: space-between;
   padding: 12px 24px;
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-white);
-  flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
+  min-height: 64px;
 }
 
 .files-header-left {
