@@ -14,8 +14,34 @@ let selectedOpenWithApp = {
   id: "__default__",
   name: "Default application",
 };
+const openWithPreferenceByType = new Map();
 const pendingUnreadIds = new Map(); // chatId → Set<messageId> tracked client-side
 const AUTO_REFRESH_INTERVAL = 10000; // 10 seconds
+
+function getSingleTypeFromSet(typeSet) {
+  return typeSet && typeSet.size === 1 ? Array.from(typeSet)[0] : null;
+}
+
+function getDefaultPreferenceApp() {
+  return { id: "__default__", name: "Default application" };
+}
+
+function getOpenWithPreferenceForType(fileType) {
+  if (!fileType) return getDefaultPreferenceApp();
+  const pref = openWithPreferenceByType.get(fileType);
+  if (pref && pref.id && pref.name) {
+    return { id: pref.id, name: pref.name };
+  }
+  return getDefaultPreferenceApp();
+}
+
+function setOpenWithPreferenceForType(fileType, app) {
+  if (!fileType || !app || !app.id) return;
+  openWithPreferenceByType.set(fileType, {
+    id: app.id,
+    name: app.name || "Default application",
+  });
+}
 
 // ── Initialization ───────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
@@ -479,6 +505,7 @@ function setupEventListeners() {
           actionsDiv.innerHTML = `
             <button class="btn-file-action" data-action="open-file" data-path="${escapeHtml(localPath)}">Open</button>
           `;
+          attachFileEventListeners(fileEl);
         }
 
         if (file.type === "sticker" && file.localPath) {
@@ -1676,6 +1703,8 @@ function updateSelectionUI() {
   if (openWithContainer) {
     openWithContainer.classList.toggle("hidden", selectedFiles.size === 0);
   }
+
+  updateOpenSelectedButtonLabel();
 }
 
 function unselectAllFiles() {
@@ -1704,6 +1733,11 @@ function getSelectedOpenableFiles() {
 function updateOpenSelectedButtonLabel() {
   const btnOpenSelected = document.getElementById("btn-open-selected");
   if (!btnOpenSelected) return;
+  const { selectedTypes } = getSelectedOpenableFiles();
+  const selectedType = getSingleTypeFromSet(selectedTypes);
+  if (selectedType) {
+    selectedOpenWithApp = getOpenWithPreferenceForType(selectedType);
+  }
   btnOpenSelected.textContent = `Open with ${selectedOpenWithApp.name}`;
 }
 
@@ -1742,7 +1776,7 @@ function getSelectedTypesForPaths(filePaths) {
   return selectedTypes;
 }
 
-function renderOpenWithDropdown(apps) {
+function renderOpenWithDropdown(apps, selectedType) {
   const dropdown = document.getElementById("open-with-dropdown");
   if (!dropdown) return;
 
@@ -1757,10 +1791,14 @@ function renderOpenWithDropdown(apps) {
     }
     option.textContent = app.name;
     option.addEventListener("click", async () => {
-      selectedOpenWithApp = { id: app.id, name: app.name };
+      const appSelection = { id: app.id, name: app.name };
+      selectedOpenWithApp = appSelection;
+      if (selectedType) {
+        setOpenWithPreferenceForType(selectedType, appSelection);
+      }
       updateOpenSelectedButtonLabel();
       hideOpenWithDropdown();
-      await openSelectedWithApp(selectedOpenWithApp);
+      await openSelectedWithApp(appSelection, selectedType);
     });
     dropdown.appendChild(option);
   });
@@ -1807,19 +1845,27 @@ async function toggleOpenWithDropdown(event) {
     return;
   }
 
+  const selectedType = getSingleTypeFromSet(selectedTypes);
   const isImageType = selectedTypes.size === 1 && selectedTypes.has("image");
+  let appToHighlight = selectedType
+    ? getOpenWithPreferenceForType(selectedType)
+    : selectedOpenWithApp;
 
-  if (isImageType && selectedOpenWithApp.id === "__default__") {
-    selectedOpenWithApp = getDefaultOpenWithApp(apps, true);
-    updateOpenSelectedButtonLabel();
+  if (isImageType && appToHighlight.id === "__default__") {
+    appToHighlight = getDefaultOpenWithApp(apps, true);
   }
 
-  if (!apps.some((app) => app.id === selectedOpenWithApp.id)) {
-    selectedOpenWithApp = getDefaultOpenWithApp(apps, isImageType);
-    updateOpenSelectedButtonLabel();
+  if (!apps.some((app) => app.id === appToHighlight.id)) {
+    appToHighlight = getDefaultOpenWithApp(apps, isImageType);
   }
 
-  renderOpenWithDropdown(apps);
+  selectedOpenWithApp = appToHighlight;
+  if (selectedType) {
+    setOpenWithPreferenceForType(selectedType, appToHighlight);
+  }
+  updateOpenSelectedButtonLabel();
+
+  renderOpenWithDropdown(apps, selectedType);
 }
 
 async function openFilesWithAppSelection(
@@ -1827,7 +1873,11 @@ async function openFilesWithAppSelection(
   preferredApp,
   options = {},
 ) {
-  const { showSuccessToast = true } = options;
+  const {
+    showSuccessToast = true,
+    selectedType: providedSelectedType = null,
+    persistSelection = false,
+  } = options;
   const normalizedFilePaths = Array.isArray(filePaths)
     ? filePaths.filter(Boolean)
     : [];
@@ -1857,7 +1907,9 @@ async function openFilesWithAppSelection(
     return;
   }
 
-  const isImageType = selectedTypes.size === 1 && selectedTypes.has("image");
+  const resolvedSelectedType =
+    providedSelectedType || getSingleTypeFromSet(selectedTypes);
+  const isImageType = resolvedSelectedType === "image";
 
   let appToUse = preferredApp || selectedOpenWithApp;
   if (isImageType && appToUse.id === "__default__") {
@@ -1866,6 +1918,13 @@ async function openFilesWithAppSelection(
 
   if (!apps.some((app) => app.id === appToUse.id)) {
     appToUse = getDefaultOpenWithApp(apps, isImageType);
+  }
+
+  if (resolvedSelectedType) {
+    setOpenWithPreferenceForType(resolvedSelectedType, appToUse);
+  }
+
+  if (persistSelection) {
     selectedOpenWithApp = appToUse;
     updateOpenSelectedButtonLabel();
   }
@@ -1896,7 +1955,7 @@ async function openFilesWithAppSelection(
   }
 }
 
-async function openSelectedWithApp(preferredApp) {
+async function openSelectedWithApp(preferredApp, selectedType = null) {
   if (selectedFiles.size === 0) {
     showToast("No downloaded files selected", "warning");
     return;
@@ -1905,12 +1964,19 @@ async function openSelectedWithApp(preferredApp) {
   const { filePaths } = getSelectedOpenableFiles();
   await openFilesWithAppSelection(filePaths, preferredApp, {
     showSuccessToast: true,
+    selectedType,
+    persistSelection: true,
   });
 }
 
 // ── Open Selected ────────────────────────────────────────────────────────
 async function openSelected() {
-  await openSelectedWithApp(selectedOpenWithApp);
+  const { selectedTypes } = getSelectedOpenableFiles();
+  const selectedType = getSingleTypeFromSet(selectedTypes);
+  const preferredApp = selectedType
+    ? getOpenWithPreferenceForType(selectedType)
+    : selectedOpenWithApp;
+  await openSelectedWithApp(preferredApp, selectedType);
 }
 
 // ── Download ─────────────────────────────────────────────────────────────
@@ -2039,8 +2105,16 @@ async function loadPrinters() {
 
 // ── Other Actions ────────────────────────────────────────────────────────
 async function openFile(filePath) {
-  await openFilesWithAppSelection([filePath], selectedOpenWithApp, {
+  const selectedTypes = getSelectedTypesForPaths([filePath]);
+  const selectedType = getSingleTypeFromSet(selectedTypes);
+  const preferredApp = selectedType
+    ? getOpenWithPreferenceForType(selectedType)
+    : selectedOpenWithApp;
+
+  await openFilesWithAppSelection([filePath], preferredApp, {
     showSuccessToast: false,
+    selectedType,
+    persistSelection: false,
   });
 }
 
