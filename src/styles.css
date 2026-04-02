@@ -584,17 +584,24 @@ body {
   flex: 1;
   gap: 16px;
   position: relative;
+}
+
+/* Watermark to match the small file-list size */
+.empty-state-large::before {
+  content: "";
+  position: fixed;
+  top: 50%;
+  left: calc(320px + ((100vw - 320px) / 2));
+  transform: translate(-50%, -50%);
+  width: 90%;
+  max-width: 1000px;
+  height: 80%;
   background-image: url("biz_removebg.jpg.png");
   background-repeat: no-repeat;
   background-position: center;
-  background-size: 90% auto;
-}
-/* Overlay to fade watermark in empty state */
-.empty-state-large::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: rgba(240, 242, 245, 0.92);
+  background-size: contain;
+  opacity: 0.06;
+  pointer-events: none;
   z-index: 0;
 }
 .empty-state-large > * {
@@ -602,12 +609,13 @@ body {
   z-index: 1;
 }
 .empty-state-large h3 {
-  font-size: 20px;
-  color: #999;
+  font-size: 22px;
+  color: #555;
+  font-weight: 600;
 }
 .empty-state-large p {
-  font-size: 14px;
-  color: #bbb;
+  font-size: 15px;
+  color: #777;
 }
 
 /* ── Files Header ────────────────────────────────────────────────────────── */
