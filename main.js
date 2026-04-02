@@ -282,10 +282,7 @@ async function listOpenWithApps(filePath) {
       command: String(x.command),
     }));
 
-  const builtIns = [
-    { id: "__default__", name: "Default application" },
-    
-  ];
+  const builtIns = [{ id: "__default__", name: "Default application" }];
   if (isImage) {
     builtIns.push({
       id: "__paint__",
@@ -589,17 +586,17 @@ async function triggerWhatsAppRecovery() {
     console.warn("[Recovery] Already recovering, skipping duplicate request");
     return;
   }
-  
+
   isRecovering = true;
   console.log("[Recovery] Starting WhatsApp client recovery...");
-  
+
   try {
     // Notify UI that recovery is starting
     mainWindow?.webContents.send("whatsapp:status", "recovering");
-    
+
     // Mark client as not ready
     isClientReady = false;
-    
+
     // Destroy the existing client
     if (whatsappClient) {
       try {
@@ -609,14 +606,14 @@ async function triggerWhatsAppRecovery() {
         console.warn("[Recovery] Error destroying client:", err.message);
       }
     }
-    
+
     // Wait a bit for cleanup
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
     // Reset detached frame counter
     detachedFrameCount = 0;
     lastDetachedFrameTime = 0;
-    
+
     // Reinitialize WhatsApp
     console.log("[Recovery] Reinitializing WhatsApp client...");
     initWhatsApp();
@@ -956,25 +953,27 @@ async function retryOnDetachedFrame(fn, retries = 3) {
         err && err.message && err.message.includes("detached Frame");
       if (isDetached) {
         const now = Date.now();
-        
+
         // Reset counter if it's been a while since the last error
         if (now - lastDetachedFrameTime > DETACHED_FRAME_WINDOW) {
           detachedFrameCount = 0;
         }
-        
+
         detachedFrameCount++;
         lastDetachedFrameTime = now;
-        
+
         console.warn(
           `[Retry] Detached frame on attempt ${attempt}/${retries} (total: ${detachedFrameCount}), waiting for page to recover...`,
         );
-        
+
         // If we've hit the threshold, trigger recovery
         if (detachedFrameCount >= DETACHED_FRAME_THRESHOLD && !isRecovering) {
-          console.error(`[Recovery] Detached frame threshold reached (${detachedFrameCount}). Triggering WhatsApp client recovery...`);
+          console.error(
+            `[Recovery] Detached frame threshold reached (${detachedFrameCount}). Triggering WhatsApp client recovery...`,
+          );
           triggerWhatsAppRecovery();
         }
-        
+
         if (attempt < retries) {
           await waitForPageReady();
         } else {
@@ -1236,9 +1235,14 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         if (!chat) return null;
         const allMsgs = chat.msgs?.getModelsArray?.() || [];
         const unreadCount = chat.unreadCount || 0;
-        
+
         // Get chat contact name for fallback
-        const chatName = chat.name || chat.contact?.pushname || chat.contact?.name || chat.formattedTitle || null;
+        const chatName =
+          chat.name ||
+          chat.contact?.pushname ||
+          chat.contact?.name ||
+          chat.formattedTitle ||
+          null;
 
         // Compute unread IDs from ALL messages (text + media) so that
         // slice(-unreadCount) correctly identifies the last N messages
@@ -1267,7 +1271,14 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
               const isFromMe = m.id?.fromMe || m.fromMe;
               let sender = null;
               if (!isFromMe) {
-                sender = m.notifyName || m._data?.notifyName || m.senderObj?.pushname || m.senderObj?.name || m.pushName || m._data?.pushName || chatName;
+                sender =
+                  m.notifyName ||
+                  m._data?.notifyName ||
+                  m.senderObj?.pushname ||
+                  m.senderObj?.name ||
+                  m.pushName ||
+                  m._data?.pushName ||
+                  chatName;
               }
               return {
                 id: m.id?._serialized,
@@ -1314,11 +1325,11 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
       const safeId = (raw.id || "").replace(/[^a-zA-Z0-9]/g, "_");
       const expectedPath = path.join(DOWNLOADS_DIR, `${safeId}_${fileName}`);
       const isDownloaded = fs.existsSync(expectedPath);
-      
+
       // Determine sender - use "You" for messages you sent, otherwise try to get sender name
       const isFromMe = raw.fromMe === true;
-      const senderName = isFromMe ? null : (raw.sender || chatName || "Unknown");
-      
+      const senderName = isFromMe ? null : raw.sender || chatName || "Unknown";
+
       return {
         messageId: raw.id,
         chatId,
@@ -1341,8 +1352,14 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
     function extractFileInfo(msg) {
       // Determine sender - use null for messages you sent (renderer shows "You"), otherwise get sender name
       const isFromMe = msg.id?.fromMe || msg.fromMe;
-      const senderName = isFromMe ? null : (msg._data?.notifyName || msg._data?.pushName || msg.author || chatName || "Unknown");
-      
+      const senderName = isFromMe
+        ? null
+        : msg._data?.notifyName ||
+          msg._data?.pushName ||
+          msg.author ||
+          chatName ||
+          "Unknown";
+
       const info = {
         messageId: msg.id._serialized,
         chatId,
@@ -1518,7 +1535,13 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         }
 
         // 5. Resolve sender names for printable messages only
-        const ALLOWED_TYPES_FOR_SENDER = ["chat", "image", "document", "ptt", "audio"];
+        const ALLOWED_TYPES_FOR_SENDER = [
+          "chat",
+          "image",
+          "document",
+          "ptt",
+          "audio",
+        ];
         const allWWJSMedia = serverMessages.filter(
           (m) => m.hasMedia || ALLOWED_TYPES_FOR_SENDER.includes(m.type),
         );
@@ -2179,7 +2202,7 @@ ipcMain.handle("send-text-message", async (event, chatId, message) => {
       whatsappClient.getChatById(chatId),
     );
     const sentMsg = await retryOnDetachedFrame(() => chat.sendMessage(message));
-    
+
     // Notify renderer about the sent message
     const msgInfo = {
       messageId: sentMsg.id._serialized,
@@ -2191,7 +2214,7 @@ ipcMain.handle("send-text-message", async (event, chatId, message) => {
       fromMe: true,
     };
     mainWindow?.webContents.send("whatsapp:message-sent", msgInfo);
-    
+
     return { success: true, messageId: sentMsg.id._serialized };
   } catch (err) {
     console.error("Error sending text message:", err);
@@ -2200,180 +2223,220 @@ ipcMain.handle("send-text-message", async (event, chatId, message) => {
 });
 
 // Send voice message
-ipcMain.handle("send-voice-message", async (event, chatId, audioBase64, mimeType) => {
-  if (!isClientReady) return { error: "WhatsApp not ready" };
-  if (!chatId || !audioBase64) return { error: "Missing chatId or audio data" };
-  
-  // Validate audio base64 data
-  if (typeof audioBase64 !== "string" || audioBase64.length === 0) {
-    return { error: "Audio data is invalid or empty" };
-  }
-  
-  try {
-    const chat = await retryOnDetachedFrame(() =>
-      whatsappClient.getChatById(chatId),
-    );
-    
-    // Log chat details for debugging
-    console.log(`Chat info - ID: ${chatId}, Name: ${chat.name}, IsGroup: ${chat.isGroup}, IsReadOnly: ${chat.isReadOnly}, Contact: ${chat.contact?.name || "N/A"}`);
+ipcMain.handle(
+  "send-voice-message",
+  async (event, chatId, audioBase64, mimeType) => {
+    if (!isClientReady) return { error: "WhatsApp not ready" };
+    if (!chatId || !audioBase64)
+      return { error: "Missing chatId or audio data" };
 
-    // Try the provided MIME first, then common voice-safe fallbacks.
-    const inputMime = String(mimeType || "").trim();
-    const strippedMime = inputMime ? inputMime.split(";")[0].trim() : "";
-    const mimeCandidates = [
-      inputMime,
-      strippedMime,
-      "audio/ogg;codecs=opus",
-      "audio/ogg",
-      "audio/webm;codecs=opus",
-      "audio/webm",
-    ].filter(Boolean);
-
-    // Deduplicate while preserving order.
-    const uniqueMimes = [...new Set(mimeCandidates)];
-    
-    console.log(`Attempting voice send for chat ${chatId}, audio size: ${audioBase64.length} chars, MIME options: ${uniqueMimes.join(", ")}`);
-
-    let sentMsg = null;
-    let lastError = null;
-
-    for (const candidateMime of uniqueMimes) {
-      const ext = candidateMime.includes("ogg")
-        ? "ogg"
-        : candidateMime.includes("webm")
-          ? "webm"
-          : "ogg";
-
-      console.log(`Creating MessageMedia with MIME: ${candidateMime}, filename: voice.${ext}, base64 length: ${audioBase64.length}`);
-      
-      try {
-        const media = new MessageMedia(candidateMime, audioBase64, `voice.${ext}`);
-        console.log(`MessageMedia created successfully, media.mimetype: ${media.mimetype}, media.filename: ${media.filename}`);
-
-        // Prefer true WhatsApp voice-note mode first.
-        try {
-          console.log(`Sending as voice message...`);
-          sentMsg = await retryOnDetachedFrame(() =>
-            chat.sendMessage(media, { sendAudioAsVoice: true }),
-          );
-          console.log(`✓ Voice send succeeded!`);
-          break;
-        } catch (voiceErr) {
-          lastError = voiceErr;
-          const voiceDetails = voiceErr?.stack || JSON.stringify(voiceErr) || String(voiceErr);
-          console.warn(`Voice send failed with MIME ${candidateMime}:`, voiceErr?.message || voiceErr, "Details:", voiceDetails);
-        }
-
-        // Fallback: some environments cannot encode a valid PTT payload.
-        // Send as regular audio so message is not lost.
-        try {
-          console.log(`Fallback: Sending as regular audio message...`);
-          sentMsg = await retryOnDetachedFrame(() =>
-            chat.sendMessage(media, { sendAudioAsVoice: false }),
-          );
-          console.log(`✓ Audio fallback send succeeded!`);
-          break;
-        } catch (audioErr) {
-          lastError = audioErr;
-          const audioDetails = audioErr?.stack || JSON.stringify(audioErr) || String(audioErr);
-          console.warn(`Fallback audio send failed with MIME ${candidateMime}:`, audioErr?.message || audioErr, "Details:", audioDetails);
-        }
-      } catch (mediaErr) {
-        console.error(`Failed to create MessageMedia:`, mediaErr?.message || mediaErr);
-        lastError = mediaErr;
-      }
+    // Validate audio base64 data
+    if (typeof audioBase64 !== "string" || audioBase64.length === 0) {
+      return { error: "Audio data is invalid or empty" };
     }
 
-    if (!sentMsg) {
-      // Extract meaningful error from lastError
-      let errorMsg = "Could not send voice message";
-      if (lastError) {
-        const orig = lastError?.message || String(lastError) || "";
-        if (orig === "t" || orig === "t: t") {
-          // WhatsApp Web API error - likely session/auth/rate limit issue
-          errorMsg = "WhatsApp Web validation failed. Try: 1) Refresh the app, 2) Check your internet, 3) Re-scan QR code";
-        } else {
-          errorMsg = orig || errorMsg;
-        }
-      }
-      
-      // Last resort: try sending as a plain audio file without voice options
-      console.log("Last resort: attempting to send as plain audio file...");
-      try {
-        const lastMime = uniqueMimes[uniqueMimes.length - 1] || "audio/webm";
-        const ext = lastMime.includes("ogg") ? "ogg" : "webm";
-        const plainMedia = new MessageMedia(lastMime, audioBase64, `audio.${ext}`);
-        sentMsg = await retryOnDetachedFrame(() =>
-          chat.sendMessage(plainMedia),
+    try {
+      const chat = await retryOnDetachedFrame(() =>
+        whatsappClient.getChatById(chatId),
+      );
+
+      // Log chat details for debugging
+      console.log(
+        `Chat info - ID: ${chatId}, Name: ${chat.name}, IsGroup: ${chat.isGroup}, IsReadOnly: ${chat.isReadOnly}, Contact: ${chat.contact?.name || "N/A"}`,
+      );
+
+      // Try the provided MIME first, then common voice-safe fallbacks.
+      const inputMime = String(mimeType || "").trim();
+      const strippedMime = inputMime ? inputMime.split(";")[0].trim() : "";
+      const mimeCandidates = [
+        inputMime,
+        strippedMime,
+        "audio/ogg;codecs=opus",
+        "audio/ogg",
+        "audio/webm;codecs=opus",
+        "audio/webm",
+      ].filter(Boolean);
+
+      // Deduplicate while preserving order.
+      const uniqueMimes = [...new Set(mimeCandidates)];
+
+      console.log(
+        `Attempting voice send for chat ${chatId}, audio size: ${audioBase64.length} chars, MIME options: ${uniqueMimes.join(", ")}`,
+      );
+
+      let sentMsg = null;
+      let lastError = null;
+
+      for (const candidateMime of uniqueMimes) {
+        const ext = candidateMime.includes("ogg")
+          ? "ogg"
+          : candidateMime.includes("webm")
+            ? "webm"
+            : "ogg";
+
+        console.log(
+          `Creating MessageMedia with MIME: ${candidateMime}, filename: voice.${ext}, base64 length: ${audioBase64.length}`,
         );
-        console.log("✓ Plain audio file send succeeded!");
-      } catch (plainErr) {
-        console.error("Last resort also failed:", plainErr?.message);
+
+        try {
+          const media = new MessageMedia(
+            candidateMime,
+            audioBase64,
+            `voice.${ext}`,
+          );
+          console.log(
+            `MessageMedia created successfully, media.mimetype: ${media.mimetype}, media.filename: ${media.filename}`,
+          );
+
+          // Prefer true WhatsApp voice-note mode first.
+          try {
+            console.log(`Sending as voice message...`);
+            sentMsg = await retryOnDetachedFrame(() =>
+              chat.sendMessage(media, { sendAudioAsVoice: true }),
+            );
+            console.log(`✓ Voice send succeeded!`);
+            break;
+          } catch (voiceErr) {
+            lastError = voiceErr;
+            const voiceDetails =
+              voiceErr?.stack || JSON.stringify(voiceErr) || String(voiceErr);
+            console.warn(
+              `Voice send failed with MIME ${candidateMime}:`,
+              voiceErr?.message || voiceErr,
+              "Details:",
+              voiceDetails,
+            );
+          }
+
+          // Fallback: some environments cannot encode a valid PTT payload.
+          // Send as regular audio so message is not lost.
+          try {
+            console.log(`Fallback: Sending as regular audio message...`);
+            sentMsg = await retryOnDetachedFrame(() =>
+              chat.sendMessage(media, { sendAudioAsVoice: false }),
+            );
+            console.log(`✓ Audio fallback send succeeded!`);
+            break;
+          } catch (audioErr) {
+            lastError = audioErr;
+            const audioDetails =
+              audioErr?.stack || JSON.stringify(audioErr) || String(audioErr);
+            console.warn(
+              `Fallback audio send failed with MIME ${candidateMime}:`,
+              audioErr?.message || audioErr,
+              "Details:",
+              audioDetails,
+            );
+          }
+        } catch (mediaErr) {
+          console.error(
+            `Failed to create MessageMedia:`,
+            mediaErr?.message || mediaErr,
+          );
+          lastError = mediaErr;
+        }
       }
-      
+
       if (!sentMsg) {
-        throw new Error(errorMsg);
+        // Extract meaningful error from lastError
+        let errorMsg = "Could not send voice message";
+        if (lastError) {
+          const orig = lastError?.message || String(lastError) || "";
+          if (orig === "t" || orig === "t: t") {
+            // WhatsApp Web API error - likely session/auth/rate limit issue
+            errorMsg =
+              "WhatsApp Web validation failed. Try: 1) Refresh the app, 2) Check your internet, 3) Re-scan QR code";
+          } else {
+            errorMsg = orig || errorMsg;
+          }
+        }
+
+        // Last resort: try sending as a plain audio file without voice options
+        console.log("Last resort: attempting to send as plain audio file...");
+        try {
+          const lastMime = uniqueMimes[uniqueMimes.length - 1] || "audio/webm";
+          const ext = lastMime.includes("ogg") ? "ogg" : "webm";
+          const plainMedia = new MessageMedia(
+            lastMime,
+            audioBase64,
+            `audio.${ext}`,
+          );
+          sentMsg = await retryOnDetachedFrame(() =>
+            chat.sendMessage(plainMedia),
+          );
+          console.log("✓ Plain audio file send succeeded!");
+        } catch (plainErr) {
+          console.error("Last resort also failed:", plainErr?.message);
+        }
+
+        if (!sentMsg) {
+          throw new Error(errorMsg);
+        }
       }
+
+      // Notify renderer about the sent message
+      const msgInfo = {
+        messageId: sentMsg.id._serialized,
+        chatId,
+        sender: null,
+        timestamp: sentMsg.timestamp || Math.floor(Date.now() / 1000),
+        type: sentMsg.type || "ptt",
+        body: "",
+        fromMe: true,
+      };
+      mainWindow?.webContents.send("whatsapp:message-sent", msgInfo);
+
+      return { success: true, messageId: sentMsg.id._serialized };
+    } catch (err) {
+      console.error("Error sending voice message:", err);
+      // Extract error details more carefully
+      const errorMessage =
+        err?.message || (err && String(err)) || "Failed to send voice message";
+      return { error: errorMessage };
     }
-    
-    // Notify renderer about the sent message
-    const msgInfo = {
-      messageId: sentMsg.id._serialized,
-      chatId,
-      sender: null,
-      timestamp: sentMsg.timestamp || Math.floor(Date.now() / 1000),
-      type: sentMsg.type || "ptt",
-      body: "",
-      fromMe: true,
-    };
-    mainWindow?.webContents.send("whatsapp:message-sent", msgInfo);
-    
-    return { success: true, messageId: sentMsg.id._serialized };
-  } catch (err) {
-    console.error("Error sending voice message:", err);
-    // Extract error details more carefully
-    const errorMessage = err?.message || (err && String(err)) || "Failed to send voice message";
-    return { error: errorMessage };
-  }
-});
+  },
+);
 
 // Send file message
-ipcMain.handle("send-file-message", async (event, chatId, filePath, caption) => {
-  if (!isClientReady) return { error: "WhatsApp not ready" };
-  if (!chatId || !filePath) return { error: "Missing chatId or file path" };
-  try {
-    if (!fs.existsSync(filePath)) {
-      return { error: "File not found" };
+ipcMain.handle(
+  "send-file-message",
+  async (event, chatId, filePath, caption) => {
+    if (!isClientReady) return { error: "WhatsApp not ready" };
+    if (!chatId || !filePath) return { error: "Missing chatId or file path" };
+    try {
+      if (!fs.existsSync(filePath)) {
+        return { error: "File not found" };
+      }
+
+      const chat = await retryOnDetachedFrame(() =>
+        whatsappClient.getChatById(chatId),
+      );
+
+      const media = MessageMedia.fromFilePath(filePath);
+      const sentMsg = await retryOnDetachedFrame(() =>
+        chat.sendMessage(media, { caption: caption || "" }),
+      );
+
+      // Notify renderer about the sent message
+      const msgInfo = {
+        messageId: sentMsg.id._serialized,
+        chatId,
+        sender: null,
+        timestamp: sentMsg.timestamp || Math.floor(Date.now() / 1000),
+        type: sentMsg.type || "document",
+        body: caption || "",
+        fileName: path.basename(filePath),
+        fromMe: true,
+      };
+      mainWindow?.webContents.send("whatsapp:message-sent", msgInfo);
+
+      return { success: true, messageId: sentMsg.id._serialized };
+    } catch (err) {
+      console.error("Error sending file message:", err);
+      return { error: err.message };
     }
-    
-    const chat = await retryOnDetachedFrame(() =>
-      whatsappClient.getChatById(chatId),
-    );
-    
-    const media = MessageMedia.fromFilePath(filePath);
-    const sentMsg = await retryOnDetachedFrame(() => 
-      chat.sendMessage(media, { caption: caption || "" })
-    );
-    
-    // Notify renderer about the sent message
-    const msgInfo = {
-      messageId: sentMsg.id._serialized,
-      chatId,
-      sender: null,
-      timestamp: sentMsg.timestamp || Math.floor(Date.now() / 1000),
-      type: sentMsg.type || "document",
-      body: caption || "",
-      fileName: path.basename(filePath),
-      fromMe: true,
-    };
-    mainWindow?.webContents.send("whatsapp:message-sent", msgInfo);
-    
-    return { success: true, messageId: sentMsg.id._serialized };
-  } catch (err) {
-    console.error("Error sending file message:", err);
-    return { error: err.message };
-  }
-});
+  },
+);
 
 // Select file to send (opens file dialog)
 ipcMain.handle("select-file-to-send", async () => {
@@ -2383,17 +2446,23 @@ ipcMain.handle("select-file-to-send", async () => {
     filters: [
       { name: "All Files", extensions: ["*"] },
       { name: "Images", extensions: ["jpg", "jpeg", "png", "gif", "webp"] },
-      { name: "Documents", extensions: ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt"] },
+      {
+        name: "Documents",
+        extensions: ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt"],
+      },
       { name: "Audio", extensions: ["mp3", "wav", "ogg", "m4a"] },
       { name: "Video", extensions: ["mp4", "avi", "mov", "mkv"] },
     ],
   });
-  
+
   if (result.canceled || !result.filePaths.length) {
     return { canceled: true };
   }
-  
-  return { filePath: result.filePaths[0], fileName: path.basename(result.filePaths[0]) };
+
+  return {
+    filePath: result.filePaths[0],
+    fileName: path.basename(result.filePaths[0]),
+  };
 });
 
 // Refresh / reconnect WhatsApp
