@@ -1626,7 +1626,10 @@ function updateDragSelectionToElement(fileItemEl) {
 
 function handleFileListMouseDown(event) {
   if (event.button !== 0) return;
-  if (event.target.closest(".file-actions") || event.target.closest(".file-checkbox")) {
+  if (
+    event.target.closest(".file-actions") ||
+    event.target.closest(".file-checkbox")
+  ) {
     return;
   }
 
@@ -1664,7 +1667,8 @@ function handleDragSelectionMouseMove(event) {
   }
 
   const target = event.target;
-  const fileItemEl = target && target.closest ? target.closest(".file-item") : null;
+  const fileItemEl =
+    target && target.closest ? target.closest(".file-item") : null;
   if (!fileItemEl) return;
 
   const fileList = document.getElementById("file-list");
