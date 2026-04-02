@@ -10,6 +10,16 @@ let isRefreshing = false; // guard against re-entrant refresh
 let showAllChats = false; // toggle between "recent/unread" and "all chats"
 let newMessageRefreshTimer = null; // debounce timer for post-notification refresh
 let newMessageFileReloadTimer = null; // debounce timer for file list reload
+let suppressNextFileItemClick = false;
+const dragSelectionState = {
+  active: false,
+  hasMoved: false,
+  anchorMessageId: null,
+  anchorType: null,
+  lastHoverMessageId: null,
+  startX: 0,
+  startY: 0,
+};
 let selectedOpenWithApp = {
   id: "__default__",
   name: "Default application",
@@ -219,6 +229,9 @@ function setupEventListeners() {
       closeChat();
     }
   });
+
+  document.addEventListener("mousemove", handleDragSelectionMouseMove);
+  document.addEventListener("mouseup", finishDragSelection);
 
   // WhatsApp QR Code
   window.api.onQRCode((qrDataURL) => {
@@ -1473,6 +1486,11 @@ function renderFileItem(file) {
 // Attach action + click-to-select listeners to file items within a container.
 // Safe to call multiple times — uses event delegation markers to avoid duplication.
 function attachFileEventListeners(container) {
+  if (!container.dataset.dragSelectionAttached) {
+    container.dataset.dragSelectionAttached = "1";
+    container.addEventListener("mousedown", handleFileListMouseDown);
+  }
+
   container.querySelectorAll("[data-action]").forEach((el) => {
     if (el.dataset.listenerAttached) return;
     el.dataset.listenerAttached = "1";
@@ -1487,6 +1505,11 @@ function attachFileEventListeners(container) {
     if (el.dataset.clickAttached) return;
     el.dataset.clickAttached = "1";
     el.addEventListener("click", async (e) => {
+      if (suppressNextFileItemClick) {
+        suppressNextFileItemClick = false;
+        return;
+      }
+
       if (
         e.target.closest(".file-actions") ||
         e.target.closest(".file-checkbox")
@@ -1517,6 +1540,156 @@ function attachFileEventListeners(container) {
       }
     });
   });
+}
+
+function getVisibleFileItemsInOrder() {
+  const fileList = document.getElementById("file-list");
+  if (!fileList) return [];
+
+  return Array.from(fileList.querySelectorAll(".file-item")).filter((el) => {
+    if (!el || !el.dataset.messageId) return false;
+    if (el.style.display === "none") return false;
+    return true;
+  });
+}
+
+function getFileTypeByMessageId(messageId) {
+  const file = currentFiles.find((f) => f.messageId === messageId);
+  if (!file) return null;
+  return getFileType(file.fileName);
+}
+
+function applySelectionFromMessageIds(messageIds) {
+  selectedFiles.clear();
+  messageIds.forEach((msgId) => selectedFiles.add(msgId));
+
+  const fileList = document.getElementById("file-list");
+  if (!fileList) {
+    updateSelectionUI();
+    return;
+  }
+
+  fileList.querySelectorAll(".file-item").forEach((el) => {
+    const msgId = el.dataset.messageId;
+    const isSelected = selectedFiles.has(msgId);
+    el.classList.toggle("selected", isSelected);
+    const checkbox = el.querySelector(".file-checkbox");
+    if (checkbox) checkbox.checked = isSelected;
+  });
+
+  updateSelectionUI();
+}
+
+function getDragTypeFilteredRange(anchorMessageId, hoverMessageId, anchorType) {
+  const orderedItems = getVisibleFileItemsInOrder();
+  const startIndex = orderedItems.findIndex(
+    (el) => el.dataset.messageId === anchorMessageId,
+  );
+  const endIndex = orderedItems.findIndex(
+    (el) => el.dataset.messageId === hoverMessageId,
+  );
+
+  if (startIndex === -1 || endIndex === -1) return [];
+
+  const min = Math.min(startIndex, endIndex);
+  const max = Math.max(startIndex, endIndex);
+  const selectedIds = [];
+
+  for (let i = min; i <= max; i++) {
+    const msgId = orderedItems[i].dataset.messageId;
+    if (!msgId) continue;
+    const type = getFileTypeByMessageId(msgId);
+    if (type === anchorType) {
+      selectedIds.push(msgId);
+    }
+  }
+
+  return selectedIds;
+}
+
+function updateDragSelectionToElement(fileItemEl) {
+  if (!dragSelectionState.active || !fileItemEl) return;
+
+  const hoverMessageId = fileItemEl.dataset.messageId;
+  if (!hoverMessageId) return;
+
+  if (dragSelectionState.lastHoverMessageId === hoverMessageId) return;
+  dragSelectionState.lastHoverMessageId = hoverMessageId;
+
+  const selectedIds = getDragTypeFilteredRange(
+    dragSelectionState.anchorMessageId,
+    hoverMessageId,
+    dragSelectionState.anchorType,
+  );
+  applySelectionFromMessageIds(selectedIds);
+}
+
+function handleFileListMouseDown(event) {
+  if (event.button !== 0) return;
+  if (event.target.closest(".file-actions") || event.target.closest(".file-checkbox")) {
+    return;
+  }
+
+  const fileItemEl = event.target.closest(".file-item");
+  if (!fileItemEl) return;
+
+  const messageId = fileItemEl.dataset.messageId;
+  if (!messageId) return;
+
+  const anchorType = getFileTypeByMessageId(messageId);
+  if (!anchorType) return;
+
+  dragSelectionState.active = true;
+  dragSelectionState.hasMoved = false;
+  dragSelectionState.anchorMessageId = messageId;
+  dragSelectionState.anchorType = anchorType;
+  dragSelectionState.lastHoverMessageId = messageId;
+  dragSelectionState.startX = event.clientX;
+  dragSelectionState.startY = event.clientY;
+}
+
+function handleDragSelectionMouseMove(event) {
+  if (!dragSelectionState.active) return;
+
+  const movedX = Math.abs(event.clientX - dragSelectionState.startX);
+  const movedY = Math.abs(event.clientY - dragSelectionState.startY);
+  const movedEnough = movedX > 3 || movedY > 3;
+
+  if (!dragSelectionState.hasMoved) {
+    if (!movedEnough) return;
+    dragSelectionState.hasMoved = true;
+    suppressNextFileItemClick = true;
+    // Start with anchor selected when drag begins.
+    applySelectionFromMessageIds([dragSelectionState.anchorMessageId]);
+  }
+
+  const target = event.target;
+  const fileItemEl = target && target.closest ? target.closest(".file-item") : null;
+  if (!fileItemEl) return;
+
+  const fileList = document.getElementById("file-list");
+  if (!fileList || !fileList.contains(fileItemEl)) return;
+
+  updateDragSelectionToElement(fileItemEl);
+}
+
+function finishDragSelection() {
+  const shouldAutoClearSuppression =
+    dragSelectionState.active && dragSelectionState.hasMoved;
+
+  if (!dragSelectionState.active) return;
+
+  dragSelectionState.active = false;
+  dragSelectionState.hasMoved = false;
+  dragSelectionState.anchorMessageId = null;
+  dragSelectionState.anchorType = null;
+  dragSelectionState.lastHoverMessageId = null;
+
+  if (shouldAutoClearSuppression) {
+    setTimeout(() => {
+      suppressNextFileItemClick = false;
+    }, 0);
+  }
 }
 
 function renderFiles() {
