@@ -482,7 +482,9 @@ function setupEventListeners() {
         }
 
         if (file.type === "sticker" && file.localPath) {
-          const stickerContent = fileEl.querySelector(".sticker-message-content");
+          const stickerContent = fileEl.querySelector(
+            ".sticker-message-content",
+          );
           if (stickerContent) {
             const stickerSrc = `file:///${file.localPath.replace(/\\/g, "/")}`;
             stickerContent.innerHTML = `<img class="sticker-image" src="${escapeHtml(stickerSrc)}" alt="Sticker" loading="lazy" />`;
@@ -491,7 +493,11 @@ function setupEventListeners() {
       }
 
       // Auto-select unread files (same behaviour as selectChat's initial render)
-      if (file.isUnread && isSelectableMediaFile(file) && !selectedFiles.has(messageId)) {
+      if (
+        file.isUnread &&
+        isSelectableMediaFile(file) &&
+        !selectedFiles.has(messageId)
+      ) {
         selectedFiles.add(messageId);
         if (fileEl) {
           fileEl.classList.add("selected");
@@ -608,11 +614,12 @@ function optimisticChatUpdate(data, isContainer = false) {
     // Update last message preview (only for real messages, not containers)
     if (!isContainer) {
       const lastMsgEl = existing.querySelector(".chat-last-msg");
-      const preview = data.type === "sticker"
-        ? "Sticker"
-        : data.hasMedia
-          ? `📎 ${data.fileName || data.type || "File"}`
-          : data.body || "";
+      const preview =
+        data.type === "sticker"
+          ? "Sticker"
+          : data.hasMedia
+            ? `📎 ${data.fileName || data.type || "File"}`
+            : data.body || "";
       if (lastMsgEl) {
         lastMsgEl.textContent = preview;
       } else if (preview) {
