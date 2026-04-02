@@ -521,6 +521,17 @@ body {
   letter-spacing: 0.3px;
 }
 
+.chat-contact-name {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 1px;
+  line-height: 1.2;
+  opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .chat-whatsapp-name {
   font-size: 12px;
   color: var(--text-secondary);

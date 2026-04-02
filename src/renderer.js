@@ -349,21 +349,31 @@ function setupEventListeners() {
         Object.assign(window._chatData[data.id], data);
       }
 
-      // Update display name if enrichment resolved a better one
-      if (data.name) {
-        const nameEl = el.querySelector(".chat-name");
-        if (nameEl) {
-          const isGroup = nameEl.textContent.includes("\uD83D\uDC65");
-          nameEl.textContent = data.name + (isGroup ? " \uD83D\uDC65" : "");
-        }
-        el.dataset.chatName = data.name;
+      const chatData =
+        (window._chatData && window._chatData[data.id]) || data;
+      const displayNumber = getDisplayChatNumber(chatData);
+      const displayName = getDisplayChatName(chatData, displayNumber);
+
+      const numberEl = el.querySelector(".chat-number");
+      if (numberEl) {
+        numberEl.textContent = displayNumber;
+        numberEl.classList.toggle("hidden", !displayNumber);
       }
+
+      const contactNameEl = el.querySelector(".chat-contact-name");
+      if (contactNameEl) {
+        contactNameEl.textContent =
+          displayName + (chatData.isGroup ? " \uD83D\uDC65" : "");
+        contactNameEl.classList.toggle("hidden", !displayName);
+      }
+
+      el.dataset.chatName = displayName || displayNumber || chatData.name || "";
 
       // Update profile picture
       if (data.profilePicUrl) {
         const avatarEl = el.querySelector(".chat-avatar");
         if (avatarEl) {
-          const initials = getInitials(data.name || "");
+          const initials = getInitials(displayName || displayNumber || chatData.name || "");
           avatarEl.innerHTML = `<img src="${escapeHtml(data.profilePicUrl)}" alt="" onerror="this.parentElement.textContent='${initials}'">`;
         }
       }
@@ -856,6 +866,72 @@ function updateConnectionBadge() {
 
 // ── Chat List ────────────────────────────────────────────────────────────
 
+function isInternalWhatsAppCode(value) {
+  return /^\d{13,}$/.test(String(value || "").trim());
+}
+
+function looksLikePhoneLabel(value) {
+  return /^\+?[\d\s()\-]{5,}$/.test(String(value || "").trim());
+}
+
+function getDisplayChatNumber(chat) {
+  const chatId = String(chat?.id || "").toLowerCase();
+  if (chatId.endsWith("@g.us")) {
+    return "";
+  }
+
+  const candidates = [
+    String(chat?.number || "").trim(),
+    String(chat?.name || "").trim(),
+    String(chat?.whatsappName || "").trim(),
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    if (isInternalWhatsAppCode(candidate)) continue;
+    if (looksLikePhoneLabel(candidate)) return candidate;
+  }
+
+  return "";
+}
+
+function getDisplayChatName(chat, displayNumber = "") {
+  const rawName = String(chat?.name || "").trim();
+  const whatsappName = String(chat?.whatsappName || "").trim();
+
+  const cleanRawName = isInternalWhatsAppCode(rawName) ? "" : rawName;
+  const cleanWhatsappName = isInternalWhatsAppCode(whatsappName)
+    ? ""
+    : whatsappName;
+
+  // For unsaved contacts, prefer the WhatsApp registration/profile name.
+  if (
+    cleanWhatsappName &&
+    !looksLikePhoneLabel(cleanWhatsappName) &&
+    cleanWhatsappName !== displayNumber
+  ) {
+    return cleanWhatsappName;
+  }
+
+  if (
+    cleanRawName &&
+    !looksLikePhoneLabel(cleanRawName) &&
+    cleanRawName !== displayNumber
+  ) {
+    return cleanRawName;
+  }
+
+  if (cleanWhatsappName && cleanWhatsappName !== displayNumber) {
+    return cleanWhatsappName;
+  }
+
+  if (cleanRawName && cleanRawName !== displayNumber) {
+    return cleanRawName;
+  }
+
+  return "";
+}
+
 function filterChats(query) {
   const chatItems = document.querySelectorAll(".chat-item");
   const q = query.toLowerCase().trim();
@@ -1042,7 +1118,9 @@ async function refreshChats() {
 
   chatList.innerHTML = chats
     .map((chat) => {
-      const initials = getInitials(chat.name);
+      const displayNumber = getDisplayChatNumber(chat);
+      const displayName = getDisplayChatName(chat, displayNumber);
+      const initials = getInitials(displayName || displayNumber || chat.name);
       const avatarContent = chat.profilePicUrl
         ? `<img src="${escapeHtml(chat.profilePicUrl)}" alt="" onerror="this.parentElement.textContent='${initials}'">`
         : initials;
@@ -1061,11 +1139,11 @@ async function refreshChats() {
         : "";
 
       return `
-      <div class="chat-item ${isActive}" data-chat-id="${escapeHtml(chat.id)}" data-chat-name="${escapeHtml(chat.name)}">
+      <div class="chat-item ${isActive}" data-chat-id="${escapeHtml(chat.id)}" data-chat-name="${escapeHtml(displayName || displayNumber || chat.name || "")}">
         <div class="chat-avatar">${avatarContent}</div>
         <div class="chat-info">
-          <div class="chat-name">${escapeHtml(chat.name)} ${chat.isGroup ? "👥" : ""}</div>
-          <div class="chat-number">${chat.number}</div>
+          ${displayNumber ? `<div class="chat-number chat-number-highlight">${escapeHtml(displayNumber)}</div>` : ""}
+          <div class="chat-contact-name${displayName ? "" : " hidden"}">${escapeHtml(displayName)} ${chat.isGroup ? "👥" : ""}</div>
           ${lastMsg}
         </div>
         ${unreadBadge}
