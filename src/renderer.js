@@ -1475,7 +1475,9 @@ function attachFileEventListeners(container) {
         // After download, select the file
         toggleFileSelect(msgId);
         // Update checkbox state after re-render
-        const fileItem = document.getElementById(`file-${msgId.replace(/[^a-zA-Z0-9]/g, "_")}`);
+        const fileItem = document.getElementById(
+          `file-${msgId.replace(/[^a-zA-Z0-9]/g, "_")}`,
+        );
         if (fileItem) {
           const checkbox = fileItem.querySelector(".file-checkbox");
           if (checkbox) checkbox.checked = selectedFiles.has(msgId);
