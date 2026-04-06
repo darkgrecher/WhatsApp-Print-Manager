@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-print-app",
-  "version": "3.0.5",
+  "version": "3.0.8",
   "description": "WhatsApp Print Manager - Download and print files from WhatsApp messages",
   "main": "main.js",
   "scripts": {
@@ -54,7 +54,8 @@
     "publish": {
       "provider": "github",
       "owner": "darkgrecher",
-      "repo": "WhatsApp-Print-Manager"
+      "repo": "WhatsApp-Print-Manager",
+      "releaseType": "release"
     },
     "nsis": {
       "oneClick": false,
