@@ -2465,13 +2465,23 @@ async function checkForUpdates() {
   try {
     const result = await window.api.checkForUpdates();
     if (result.error) {
-      showToast("Update check failed: " + result.error, "error");
+      let errorMessage = result.error;
+      
+      // Provide more helpful messages based on error code
+      if (result.code === "UPDATE_METADATA_NOT_FOUND") {
+        errorMessage = "📦 Update server is not ready yet. " + result.error;
+      } else if (result.code === "NETWORK_ERROR") {
+        errorMessage = "🌐 " + result.error;
+      }
+      
+      showToast(errorMessage, "error");
     } else if (!result.available) {
-      showToast("You're on the latest version!", "success");
+      showToast("✅ You're on the latest version!", "success");
     }
     // If available, the main process opens the update progress window
   } catch (err) {
-    showToast("Could not check for updates", "error");
+    console.error("Update check error:", err);
+    showToast("⚠️ Could not check for updates. Please try again later.", "error");
   }
 }
 

@@ -2844,7 +2844,28 @@ ipcMain.handle("check-for-updates", async () => {
     return { available: true, current, latest };
   } catch (err) {
     console.error("[Updater] Check failed:", err.message);
-    return { available: false, error: err.message };
+    
+    // Handle common error scenarios
+    if (err.message && err.message.includes("404")) {
+      return { 
+        available: false, 
+        error: "Update server not ready. Please check back later or visit the GitHub repository for manual download.",
+        code: "UPDATE_METADATA_NOT_FOUND"
+      };
+    }
+    
+    if (err.message && (err.message.includes("ENOTFOUND") || err.message.includes("ECONNREFUSED"))) {
+      return { 
+        available: false, 
+        error: "Network error. Please check your internet connection and try again.",
+        code: "NETWORK_ERROR"
+      };
+    }
+    
+    return { 
+      available: false, 
+      error: err.message || "Failed to check for updates. Please try again later."
+    };
   }
 });
 
