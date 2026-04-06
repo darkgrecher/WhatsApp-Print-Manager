@@ -2780,7 +2780,10 @@ function toProgressPayload(progress) {
 function sendUpdateProgress(progress) {
   latestUpdateProgress = toProgressPayload(progress);
   if (updateWindow && !updateWindow.isDestroyed()) {
-    updateWindow.webContents.send("update:download-progress", latestUpdateProgress);
+    updateWindow.webContents.send(
+      "update:download-progress",
+      latestUpdateProgress,
+    );
   }
 }
 
@@ -2803,7 +2806,10 @@ function startUpdateDownloadWhenWindowReady() {
     console.log("[Updater] Window ready, starting download...");
     autoUpdater.downloadUpdate().catch((err) => {
       updateDownloadInProgress = false;
-      console.error("[Updater] downloadUpdate() rejected:", err?.message || err);
+      console.error(
+        "[Updater] downloadUpdate() rejected:",
+        err?.message || err,
+      );
     });
   };
 
@@ -2851,7 +2857,10 @@ function createUpdateWindow() {
   updateWindow.loadFile(path.join(__dirname, "src", "update.html"));
   updateWindow.webContents.on("did-finish-load", () => {
     if (updateDownloadInProgress || latestUpdateProgress.percent > 0) {
-      updateWindow.webContents.send("update:download-progress", latestUpdateProgress);
+      updateWindow.webContents.send(
+        "update:download-progress",
+        latestUpdateProgress,
+      );
     }
   });
   updateWindow.on("closed", () => {
@@ -3019,7 +3028,9 @@ if (!gotSingleLock) {
     if (!startupUpdateResult.available) {
       startWhatsAppIfNeeded();
     } else {
-      console.log("[Updater] Startup update available. Deferring app init until update completes/cancels.");
+      console.log(
+        "[Updater] Startup update available. Deferring app init until update completes/cancels.",
+      );
     }
 
     app.on("activate", () => {
