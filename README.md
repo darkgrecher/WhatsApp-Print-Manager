@@ -151,12 +151,12 @@ Output is generated in `dist/`.
 ## Troubleshooting (Release)
 
 - 401 Bad credentials:
-    - Token is invalid/revoked or not loaded in current shell.
+  - Token is invalid/revoked or not loaded in current shell.
 - latest.yml 404:
-    - Release not published or assets not uploaded.
+  - Release not published or assets not uploaded.
 - Update not detected:
-    - Verify current app version is lower than released tag.
-    - Verify `latest.yml` URL for that tag returns 200.
+  - Verify current app version is lower than released tag.
+  - Verify `latest.yml` URL for that tag returns 200.
 
 ## Notes
 
