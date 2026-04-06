@@ -12,6 +12,15 @@ const { autoUpdater } = require("electron-updater");
 let mainWindow;
 let updateWindow;
 let updateCancelled = false;
+let updateDownloadInProgress = false;
+let latestUpdateProgress = {
+  percent: 0,
+  transferred: 0,
+  total: 0,
+  bytesPerSecond: 0,
+};
+let appStartupBlockedByUpdate = false;
+let whatsappInitStarted = false;
 let whatsappClient;
 let isClientReady = false;
 let DOWNLOADS_DIR;
@@ -2753,6 +2762,72 @@ autoUpdater.logger = console;
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
 
+function toProgressPayload(progress) {
+  const total = Number(progress?.total) || 0;
+  const transferred = Number(progress?.transferred) || 0;
+  const rawPercent = Number(progress?.percent);
+  const computedPercent = total > 0 ? (transferred / total) * 100 : 0;
+  const percent = Number.isFinite(rawPercent) ? rawPercent : computedPercent;
+
+  return {
+    percent: Math.max(0, Math.min(100, percent)),
+    transferred,
+    total,
+    bytesPerSecond: Number(progress?.bytesPerSecond) || 0,
+  };
+}
+
+function sendUpdateProgress(progress) {
+  latestUpdateProgress = toProgressPayload(progress);
+  if (updateWindow && !updateWindow.isDestroyed()) {
+    updateWindow.webContents.send("update:download-progress", latestUpdateProgress);
+  }
+}
+
+function startUpdateDownloadWhenWindowReady() {
+  const startDownload = () => {
+    if (updateDownloadInProgress) {
+      console.log("[Updater] Download already in progress");
+      return;
+    }
+
+    updateDownloadInProgress = true;
+    latestUpdateProgress = {
+      percent: 0,
+      transferred: 0,
+      total: 0,
+      bytesPerSecond: 0,
+    };
+    sendUpdateProgress(latestUpdateProgress);
+
+    console.log("[Updater] Window ready, starting download...");
+    autoUpdater.downloadUpdate().catch((err) => {
+      updateDownloadInProgress = false;
+      console.error("[Updater] downloadUpdate() rejected:", err?.message || err);
+    });
+  };
+
+  if (!updateWindow || updateWindow.isDestroyed()) {
+    return;
+  }
+
+  if (updateWindow.webContents.isLoading()) {
+    updateWindow.webContents.once("did-finish-load", () => {
+      setTimeout(startDownload, 200);
+    });
+  } else {
+    setTimeout(startDownload, 200);
+  }
+}
+
+function startWhatsAppIfNeeded() {
+  if (whatsappInitStarted) {
+    return;
+  }
+  whatsappInitStarted = true;
+  initWhatsApp();
+}
+
 function createUpdateWindow() {
   if (updateWindow && !updateWindow.isDestroyed()) {
     updateWindow.focus();
@@ -2774,21 +2849,32 @@ function createUpdateWindow() {
     },
   });
   updateWindow.loadFile(path.join(__dirname, "src", "update.html"));
+  updateWindow.webContents.on("did-finish-load", () => {
+    if (updateDownloadInProgress || latestUpdateProgress.percent > 0) {
+      updateWindow.webContents.send("update:download-progress", latestUpdateProgress);
+    }
+  });
   updateWindow.on("closed", () => {
     updateWindow = null;
   });
 }
 
 autoUpdater.on("download-progress", (progress) => {
+  const payload = toProgressPayload(progress);
   console.log(
-    `[Updater] Progress: ${Math.round(progress.percent)}% (${(progress.transferred / 1048576).toFixed(1)}/${(progress.total / 1048576).toFixed(1)} MB)`,
+    `[Updater] Progress: ${Math.round(payload.percent)}% (${(payload.transferred / 1048576).toFixed(1)}/${(payload.total / 1048576).toFixed(1)} MB)`,
   );
-  if (updateWindow && !updateWindow.isDestroyed()) {
-    updateWindow.webContents.send("update:download-progress", progress);
-  }
+  sendUpdateProgress(payload);
 });
 
 autoUpdater.on("update-downloaded", (info) => {
+  updateDownloadInProgress = false;
+  sendUpdateProgress({
+    percent: 100,
+    transferred: latestUpdateProgress.total || latestUpdateProgress.transferred,
+    total: latestUpdateProgress.total || latestUpdateProgress.transferred,
+    bytesPerSecond: latestUpdateProgress.bytesPerSecond,
+  });
   console.log("[Updater] Download complete:", info?.version);
   if (updateWindow && !updateWindow.isDestroyed()) {
     updateWindow.webContents.send("update:downloaded");
@@ -2800,10 +2886,15 @@ autoUpdater.on("update-downloaded", (info) => {
 });
 
 autoUpdater.on("error", (err) => {
+  updateDownloadInProgress = false;
   console.error("[Updater] Error:", err?.message || err);
   // Don't send error to window if user cancelled
   if (updateCancelled) {
     updateCancelled = false;
+    if (appStartupBlockedByUpdate) {
+      appStartupBlockedByUpdate = false;
+      startWhatsAppIfNeeded();
+    }
     return;
   }
   if (updateWindow && !updateWindow.isDestroyed()) {
@@ -2812,9 +2903,13 @@ autoUpdater.on("error", (err) => {
       err?.message || "Unknown error",
     );
   }
+  if (appStartupBlockedByUpdate) {
+    appStartupBlockedByUpdate = false;
+    startWhatsAppIfNeeded();
+  }
 });
 
-ipcMain.handle("check-for-updates", async () => {
+async function checkForUpdatesAndMaybeDownload({ startup = false } = {}) {
   try {
     console.log("[Updater] Checking for updates...");
     const result = await autoUpdater.checkForUpdates();
@@ -2830,17 +2925,11 @@ ipcMain.handle("check-for-updates", async () => {
     }
     // Update is available — open progress window and start download
     createUpdateWindow();
-    // Wait for window to finish loading before starting download
+    if (startup) {
+      appStartupBlockedByUpdate = true;
+    }
     updateCancelled = false;
-    updateWindow.webContents.once("did-finish-load", () => {
-      console.log("[Updater] Window loaded, starting download...");
-      autoUpdater.downloadUpdate().catch((err) => {
-        console.error(
-          "[Updater] downloadUpdate() rejected:",
-          err?.message || err,
-        );
-      });
-    });
+    startUpdateDownloadWhenWindowReady();
     return { available: true, current, latest };
   } catch (err) {
     console.error("[Updater] Check failed:", err.message);
@@ -2874,6 +2963,10 @@ ipcMain.handle("check-for-updates", async () => {
         err.message || "Failed to check for updates. Please try again later.",
     };
   }
+}
+
+ipcMain.handle("check-for-updates", async () => {
+  return await checkForUpdatesAndMaybeDownload({ startup: false });
 });
 
 ipcMain.handle("get-app-version", () => {
@@ -2889,8 +2982,13 @@ ipcMain.handle("restart-app", () => {
 ipcMain.on("cancel-update", () => {
   console.log("[Updater] User cancelled download");
   updateCancelled = true;
+  updateDownloadInProgress = false;
   if (updateWindow && !updateWindow.isDestroyed()) {
     updateWindow.close();
+  }
+  if (appStartupBlockedByUpdate) {
+    appStartupBlockedByUpdate = false;
+    startWhatsAppIfNeeded();
   }
 });
 
@@ -2909,12 +3007,20 @@ if (!gotSingleLock) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     cleanupGpuCache();
     cleanupStaleLockFiles();
     ensureDownloadsDir();
     createWindow();
-    initWhatsApp();
+
+    const startupUpdateResult = await checkForUpdatesAndMaybeDownload({
+      startup: true,
+    });
+    if (!startupUpdateResult.available) {
+      startWhatsAppIfNeeded();
+    } else {
+      console.log("[Updater] Startup update available. Deferring app init until update completes/cancels.");
+    }
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

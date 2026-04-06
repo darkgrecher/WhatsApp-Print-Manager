@@ -124,13 +124,22 @@
         ipcRenderer.on('update:download-progress', (_, data) => {
             const bar = document.getElementById('progress-bar');
             const text = document.getElementById('progress-text');
-            const pct = Math.round(data.percent || 0);
-            bar.style.width = pct + '%';
+            const total = Number(data.total || 0);
+            const transferred = Number(data.transferred || 0);
+            const hasKnownTotal = total > 0;
+            const pctRaw = Number(data.percent || 0);
+            const pct = Math.round(Math.max(0, Math.min(100, pctRaw)));
+
+            // Keep visible movement even if total size metadata arrives late.
+            const displayWidth = hasKnownTotal ? pct : (transferred > 0 ? 8 : 0);
+            bar.style.width = displayWidth + '%';
 
             // Show MB downloaded / total
-            const dlMB = ((data.transferred || 0) / 1048576).toFixed(1);
-            const totalMB = ((data.total || 0) / 1048576).toFixed(1);
-            text.textContent = pct + '%  (' + dlMB + ' / ' + totalMB + ' MB)';
+            const dlMB = (transferred / 1048576).toFixed(1);
+            const totalMB = (total / 1048576).toFixed(1);
+            text.textContent = hasKnownTotal
+                ? pct + '%  (' + dlMB + ' / ' + totalMB + ' MB)'
+                : 'Downloading... (' + dlMB + ' MB)';
         });
 
         ipcRenderer.on('update:downloaded', () => {
