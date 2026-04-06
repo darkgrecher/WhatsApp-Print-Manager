@@ -2466,14 +2466,14 @@ async function checkForUpdates() {
     const result = await window.api.checkForUpdates();
     if (result.error) {
       let errorMessage = result.error;
-      
+
       // Provide more helpful messages based on error code
       if (result.code === "UPDATE_METADATA_NOT_FOUND") {
         errorMessage = "📦 Update server is not ready yet. " + result.error;
       } else if (result.code === "NETWORK_ERROR") {
         errorMessage = "🌐 " + result.error;
       }
-      
+
       showToast(errorMessage, "error");
     } else if (!result.available) {
       showToast("✅ You're on the latest version!", "success");
@@ -2481,7 +2481,10 @@ async function checkForUpdates() {
     // If available, the main process opens the update progress window
   } catch (err) {
     console.error("Update check error:", err);
-    showToast("⚠️ Could not check for updates. Please try again later.", "error");
+    showToast(
+      "⚠️ Could not check for updates. Please try again later.",
+      "error",
+    );
   }
 }
 
