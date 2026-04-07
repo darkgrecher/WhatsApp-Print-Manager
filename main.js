@@ -113,16 +113,24 @@ function sanitizeExplorerFileName(name) {
   return cleaned || "file";
 }
 
-function buildExplorerTempFileName(sourcePath) {
-  const ext = path.extname(sourcePath);
-  const base = path.basename(sourcePath, ext);
-  const safeBase = sanitizeExplorerFileName(base).slice(0, 80);
-  const hash = crypto
-    .createHash("md5")
-    .update(sourcePath)
-    .digest("hex")
-    .slice(0, 8);
-  return `${safeBase}__${hash}${ext}`;
+function buildExplorerTempFileName(sourcePath, reservedNames) {
+  const sanitizedFullName = sanitizeExplorerFileName(path.basename(sourcePath));
+  const ext = path.extname(sanitizedFullName);
+  let stem = path.basename(sanitizedFullName, ext).trim() || "file";
+
+  if (stem.length > 120) {
+    stem = stem.slice(0, 120).trim() || "file";
+  }
+
+  let candidate = `${stem}${ext}`;
+  let suffix = 1;
+  while (reservedNames.has(candidate)) {
+    candidate = `${stem} (${suffix})${ext}`;
+    suffix += 1;
+  }
+
+  reservedNames.add(candidate);
+  return candidate;
 }
 
 function normalizeExistingFilePaths(filePaths) {
@@ -170,13 +178,13 @@ function syncExplorerSelectionFolder(filePaths) {
     }
 
     const keepTempPaths = new Set();
+    const reservedNames = new Set();
     let copiedCount = 0;
 
     for (const sourcePath of selectedSourcePaths) {
-      let tempPath = explorerSelectionSourceMap.get(sourcePath);
-      if (!tempPath) {
-        tempPath = path.join(folderPath, buildExplorerTempFileName(sourcePath));
-      }
+      const previousTempPath = explorerSelectionSourceMap.get(sourcePath);
+      const targetFileName = buildExplorerTempFileName(sourcePath, reservedNames);
+      const tempPath = path.join(folderPath, targetFileName);
 
       let shouldCopy = true;
       if (fs.existsSync(tempPath)) {
@@ -201,6 +209,14 @@ function syncExplorerSelectionFolder(filePaths) {
           fs.utimesSync(tempPath, srcStat.atime, srcStat.mtime);
         } catch {}
         copiedCount += 1;
+      }
+
+      if (
+        previousTempPath &&
+        previousTempPath !== tempPath &&
+        fs.existsSync(previousTempPath)
+      ) {
+        deleteFilePermanently(previousTempPath);
       }
 
       explorerSelectionSourceMap.set(sourcePath, tempPath);
