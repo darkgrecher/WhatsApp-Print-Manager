@@ -658,6 +658,177 @@ function ensureDownloadsDir() {
   }
 }
 
+const DOWNLOAD_INDEX_FILE = "download-index.json";
+let downloadIndexLoaded = false;
+const downloadIndexByMessageId = new Map();
+
+function getDownloadIndexPath() {
+  return getUserDataPath(DOWNLOAD_INDEX_FILE);
+}
+
+function ensureDownloadIndexLoaded() {
+  if (downloadIndexLoaded) return;
+  downloadIndexLoaded = true;
+
+  try {
+    const filePath = getDownloadIndexPath();
+    if (!fs.existsSync(filePath)) return;
+
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (!parsed || typeof parsed !== "object") return;
+
+    for (const [messageId, value] of Object.entries(parsed)) {
+      if (!messageId || !value || typeof value.localPath !== "string") {
+        continue;
+      }
+      downloadIndexByMessageId.set(messageId, { localPath: value.localPath });
+    }
+  } catch (error) {
+    console.warn("[DownloadIndex] Failed to load index:", error.message);
+  }
+}
+
+function persistDownloadIndex() {
+  ensureDownloadIndexLoaded();
+  const output = {};
+  for (const [messageId, entry] of downloadIndexByMessageId.entries()) {
+    if (entry?.localPath) {
+      output[messageId] = { localPath: entry.localPath };
+    }
+  }
+
+  try {
+    fs.writeFileSync(getDownloadIndexPath(), JSON.stringify(output, null, 2));
+  } catch (error) {
+    console.warn("[DownloadIndex] Failed to persist index:", error.message);
+  }
+}
+
+function getIndexedDownloadPath(messageId) {
+  if (!messageId) return null;
+  ensureDownloadIndexLoaded();
+  const entry = downloadIndexByMessageId.get(messageId);
+  if (!entry?.localPath) return null;
+
+  if (fs.existsSync(entry.localPath)) {
+    return entry.localPath;
+  }
+
+  downloadIndexByMessageId.delete(messageId);
+  persistDownloadIndex();
+  return null;
+}
+
+function setIndexedDownloadPath(messageId, localPath) {
+  if (!messageId || !localPath) return;
+  ensureDownloadIndexLoaded();
+  downloadIndexByMessageId.set(messageId, { localPath });
+  persistDownloadIndex();
+}
+
+function removeIndexedDownloadPath(messageId) {
+  if (!messageId) return;
+  ensureDownloadIndexLoaded();
+  if (downloadIndexByMessageId.delete(messageId)) {
+    persistDownloadIndex();
+  }
+}
+
+function sanitizeDownloadFileName(fileName, mimeType) {
+  const fallbackExt =
+    mime.extension(mimeType || "application/octet-stream") || "bin";
+  const raw = path.basename(String(fileName || "").trim());
+
+  let safeName = raw
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!safeName || safeName === "." || safeName === "..") {
+    safeName = `file.${fallbackExt}`;
+  }
+
+  let ext = path.extname(safeName);
+  let stem = path.basename(safeName, ext).trim();
+
+  if (!stem) stem = "file";
+  if (!ext) ext = `.${fallbackExt}`;
+
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(stem)) {
+    stem = `${stem}_`;
+  }
+
+  if (stem.length > 120) {
+    stem = stem.slice(0, 120).trim() || "file";
+  }
+
+  return `${stem}${ext}`;
+}
+
+function resolveLegacyPrefixedDownloadPath(messageId, fileName) {
+  if (!messageId || !fileName) return null;
+  const safeMessageId = String(messageId).replace(/[^a-zA-Z0-9]/g, "_");
+  const legacyPath = path.join(DOWNLOADS_DIR, `${safeMessageId}_${fileName}`);
+  return fs.existsSync(legacyPath) ? legacyPath : null;
+}
+
+function resolveDownloadedPath(messageId, fileName) {
+  const indexedPath = getIndexedDownloadPath(messageId);
+  if (indexedPath) return indexedPath;
+
+  const legacyPath = resolveLegacyPrefixedDownloadPath(messageId, fileName);
+  if (legacyPath) {
+    setIndexedDownloadPath(messageId, legacyPath);
+    return legacyPath;
+  }
+
+  return null;
+}
+
+function resolveUniqueDownloadTarget(fileName, mimeType) {
+  ensureDownloadsDir();
+  const normalizedName = sanitizeDownloadFileName(fileName, mimeType);
+  const ext = path.extname(normalizedName);
+  const stem = path.basename(normalizedName, ext);
+
+  let candidateName = normalizedName;
+  let candidatePath = path.join(DOWNLOADS_DIR, candidateName);
+  let suffix = 1;
+
+  while (fs.existsSync(candidatePath)) {
+    candidateName = `${stem} (${suffix})${ext}`;
+    candidatePath = path.join(DOWNLOADS_DIR, candidateName);
+    suffix += 1;
+  }
+
+  return { localPath: candidatePath, fileName: candidateName };
+}
+
+function saveDownloadedMedia({ messageId, fileName, mimeType, base64Data }) {
+  const existingPath = resolveDownloadedPath(messageId, fileName);
+  if (existingPath) {
+    const size = fs.existsSync(existingPath) ? fs.statSync(existingPath).size : 0;
+    return {
+      localPath: existingPath,
+      fileName: path.basename(existingPath),
+      size,
+      existed: true,
+    };
+  }
+
+  const target = resolveUniqueDownloadTarget(fileName, mimeType);
+  const buffer = Buffer.from(base64Data, "base64");
+  fs.writeFileSync(target.localPath, buffer);
+  setIndexedDownloadPath(messageId, target.localPath);
+
+  return {
+    localPath: target.localPath,
+    fileName: target.fileName,
+    size: buffer.length,
+    existed: false,
+  };
+}
+
 /**
  * Find an installed Chrome or Edge executable on this machine.
  * Puppeteer's bundled Chromium frequently crashes on fresh Windows installs
@@ -942,16 +1113,16 @@ function initWhatsApp(retryAttempt = 1) {
               const ext2 = mime.extension(media.mimetype) || "bin";
               finalFileName = `file_${Date.now()}.${ext2}`;
             }
-            const safeMsgId = msg.id._serialized.replace(/[^a-zA-Z0-9]/g, "_");
-            const localPath = path.join(
-              DOWNLOADS_DIR,
-              `${safeMsgId}_${finalFileName}`,
-            );
-            const buffer = Buffer.from(media.data, "base64");
-            fs.writeFileSync(localPath, buffer);
+            const saved = saveDownloadedMedia({
+              messageId: msg.id._serialized,
+              fileName: finalFileName,
+              mimeType: media.mimetype,
+              base64Data: media.data,
+            });
             messageData.autoDownloaded = true;
-            messageData.localPath = localPath;
-            console.log(`[WhatsApp] Auto-downloaded media: ${finalFileName}`);
+            messageData.localPath = saved.localPath;
+            messageData.fileName = saved.fileName;
+            console.log(`[WhatsApp] Auto-downloaded media: ${saved.fileName}`);
           }
         } catch (dlErr) {
           console.error("[WhatsApp] Auto-download failed:", dlErr.message);
@@ -1501,9 +1672,8 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
           mime.extension(mimeType || "application/octet-stream") || "bin";
         fileName = `${raw.type || "file"}_${raw.timestamp}.${ext}`;
       }
-      const safeId = (raw.id || "").replace(/[^a-zA-Z0-9]/g, "_");
-      const expectedPath = path.join(DOWNLOADS_DIR, `${safeId}_${fileName}`);
-      const isDownloaded = fs.existsSync(expectedPath);
+      const existingPath = resolveDownloadedPath(raw.id, fileName);
+      const isDownloaded = Boolean(existingPath);
 
       // Determine sender - use "You" for messages you sent, otherwise try to get sender name
       const isFromMe = raw.fromMe === true;
@@ -1518,11 +1688,11 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         type: raw.type,
         body: raw.body || "",
         caption: raw.body,
-        fileName,
+        fileName: isDownloaded ? path.basename(existingPath) : fileName,
         mimeType,
         fileSize,
         isDownloaded,
-        localPath: isDownloaded ? expectedPath : null,
+        localPath: existingPath || null,
         isUnread: unreadMsgIds.has(raw.id),
       };
     }
@@ -1562,13 +1732,11 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
           mime.extension(info.mimeType || "application/octet-stream") || "bin";
         info.fileName = `${info.type || "file"}_${msg.timestamp}.${ext}`;
       }
-      const expectedPath = path.join(
-        DOWNLOADS_DIR,
-        `${msg.id._serialized.replace(/[^a-zA-Z0-9]/g, "_")}_${info.fileName}`,
-      );
-      if (fs.existsSync(expectedPath)) {
+      const existingPath = resolveDownloadedPath(msg.id._serialized, info.fileName);
+      if (existingPath) {
         info.isDownloaded = true;
-        info.localPath = expectedPath;
+        info.localPath = existingPath;
+        info.fileName = path.basename(existingPath);
       }
       return info;
     }
@@ -1686,23 +1854,17 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
                 const ext = mime.extension(media.mimetype) || "bin";
                 finalFileName = `${msg.type || "file"}_${msg.timestamp}.${ext}`;
               }
-              const safeMsgId = msg.id._serialized.replace(
-                /[^a-zA-Z0-9]/g,
-                "_",
-              );
-              const localPath = path.join(
-                DOWNLOADS_DIR,
-                `${safeMsgId}_${finalFileName}`,
-              );
-              if (!fs.existsSync(localPath)) {
-                const buffer = Buffer.from(media.data, "base64");
-                fs.writeFileSync(localPath, buffer);
-              }
+              const saved = saveDownloadedMedia({
+                messageId: msg.id._serialized,
+                fileName: finalFileName,
+                mimeType: media.mimetype,
+                base64Data: media.data,
+              });
               mainWindow?.webContents.send("whatsapp:file-auto-downloaded", {
                 chatId,
                 messageId: msg.id._serialized,
-                localPath,
-                fileName: finalFileName,
+                localPath: saved.localPath,
+                fileName: saved.fileName,
               });
             } catch (e) {
               console.warn(
@@ -1795,15 +1957,12 @@ ipcMain.handle(
         finalFileName = `file_${Date.now()}.${ext}`;
       }
 
-      const safeMsgId = messageId.replace(/[^a-zA-Z0-9]/g, "_");
-      const localPath = path.join(
-        DOWNLOADS_DIR,
-        `${safeMsgId}_${finalFileName}`,
-      );
-
-      // Save file
-      const buffer = Buffer.from(media.data, "base64");
-      fs.writeFileSync(localPath, buffer);
+      const saved = saveDownloadedMedia({
+        messageId,
+        fileName: finalFileName,
+        mimeType: media.mimetype,
+        base64Data: media.data,
+      });
 
       mainWindow?.webContents.send("download:progress", {
         messageId,
@@ -1812,9 +1971,9 @@ ipcMain.handle(
 
       return {
         success: true,
-        localPath,
-        fileName: finalFileName,
-        size: buffer.length,
+        localPath: saved.localPath,
+        fileName: saved.fileName,
+        size: saved.size,
       };
     } catch (err) {
       console.error("Error downloading file:", err);
@@ -1869,21 +2028,19 @@ ipcMain.handle("download-all-files", async (event, chatId) => {
           }
         }
 
-        const safeMsgId = msg.id._serialized.replace(/[^a-zA-Z0-9]/g, "_");
-        const localPath = path.join(
-          DOWNLOADS_DIR,
-          `${safeMsgId}_${finalFileName}`,
-        );
-
-        const buffer = Buffer.from(media.data, "base64");
-        fs.writeFileSync(localPath, buffer);
+        const saved = saveDownloadedMedia({
+          messageId: msg.id._serialized,
+          fileName: finalFileName,
+          mimeType: media.mimetype,
+          base64Data: media.data,
+        });
 
         results.push({
           messageId: msg.id._serialized,
           success: true,
-          localPath,
-          fileName: finalFileName,
-          size: buffer.length,
+          localPath: saved.localPath,
+          fileName: saved.fileName,
+          size: saved.size,
         });
       } catch (dlErr) {
         results.push({ messageId: msg.id._serialized, error: dlErr.message });
@@ -2323,6 +2480,14 @@ ipcMain.handle(
       } catch (err) {
         results.push({ filePath, error: err.message });
       }
+    }
+
+    if (Array.isArray(messageIds)) {
+      results.forEach((result, index) => {
+        if (result?.success && messageIds[index]) {
+          removeIndexedDownloadPath(messageIds[index]);
+        }
+      });
     }
 
     // 2. Delete messages from WhatsApp chat
