@@ -45,7 +45,7 @@ contextBridge.exposeInMainWorld("api", {
   getProfileInfo: () => ipcRenderer.invoke("get-profile-info"),
   logoutWhatsApp: () => ipcRenderer.invoke("logout-whatsapp"),
   logoutAndRestart: () => ipcRenderer.invoke("logout-and-restart"),
-  
+
   // ── Send Messages ──
   sendTextMessage: (chatId, message) =>
     ipcRenderer.invoke("send-text-message", chatId, message),
