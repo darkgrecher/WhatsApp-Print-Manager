@@ -183,7 +183,10 @@ function syncExplorerSelectionFolder(filePaths) {
 
     for (const sourcePath of selectedSourcePaths) {
       const previousTempPath = explorerSelectionSourceMap.get(sourcePath);
-      const targetFileName = buildExplorerTempFileName(sourcePath, reservedNames);
+      const targetFileName = buildExplorerTempFileName(
+        sourcePath,
+        reservedNames,
+      );
       const tempPath = path.join(folderPath, targetFileName);
 
       let shouldCopy = true;
