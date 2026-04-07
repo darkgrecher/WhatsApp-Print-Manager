@@ -93,6 +93,173 @@ function isImageFilePath(filePath) {
   return IMAGE_EXTENSIONS.has(path.extname(filePath).toLowerCase());
 }
 
+const WINDOWS_FILE_EXPLORER_APP_ID = "__windows_file_explorer__";
+const EXPLORER_SELECTION_FOLDER = path.join(
+  os.tmpdir(),
+  "WhatsappPrintManager_SelectedFiles",
+);
+const explorerSelectionSourceMap = new Map();
+
+function ensureExplorerSelectionFolder() {
+  fs.mkdirSync(EXPLORER_SELECTION_FOLDER, { recursive: true });
+  return EXPLORER_SELECTION_FOLDER;
+}
+
+function sanitizeExplorerFileName(name) {
+  const cleaned = String(name || "")
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || "file";
+}
+
+function buildExplorerTempFileName(sourcePath) {
+  const ext = path.extname(sourcePath);
+  const base = path.basename(sourcePath, ext);
+  const safeBase = sanitizeExplorerFileName(base).slice(0, 80);
+  const hash = crypto
+    .createHash("md5")
+    .update(sourcePath)
+    .digest("hex")
+    .slice(0, 8);
+  return `${safeBase}__${hash}${ext}`;
+}
+
+function normalizeExistingFilePaths(filePaths) {
+  const inputPaths = Array.isArray(filePaths) ? filePaths : [];
+  const seen = new Set();
+  const normalized = [];
+
+  for (const rawPath of inputPaths) {
+    if (!rawPath) continue;
+    const resolvedPath = path.resolve(String(rawPath));
+    if (seen.has(resolvedPath) || !fs.existsSync(resolvedPath)) continue;
+    try {
+      const stat = fs.statSync(resolvedPath);
+      if (!stat.isFile()) continue;
+      seen.add(resolvedPath);
+      normalized.push(resolvedPath);
+    } catch {
+      // Ignore files that cannot be accessed/read.
+    }
+  }
+
+  return normalized;
+}
+
+function deleteFilePermanently(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return;
+  try {
+    fs.rmSync(filePath, { force: true });
+  } catch (error) {
+    console.warn("[ExplorerSync] Failed to remove file:", filePath, error);
+  }
+}
+
+function syncExplorerSelectionFolder(filePaths) {
+  try {
+    const folderPath = ensureExplorerSelectionFolder();
+    const selectedSourcePaths = normalizeExistingFilePaths(filePaths);
+    const selectedSet = new Set(selectedSourcePaths);
+
+    for (const [sourcePath, tempPath] of explorerSelectionSourceMap.entries()) {
+      if (!selectedSet.has(sourcePath)) {
+        deleteFilePermanently(tempPath);
+        explorerSelectionSourceMap.delete(sourcePath);
+      }
+    }
+
+    const keepTempPaths = new Set();
+    let copiedCount = 0;
+
+    for (const sourcePath of selectedSourcePaths) {
+      let tempPath = explorerSelectionSourceMap.get(sourcePath);
+      if (!tempPath) {
+        tempPath = path.join(folderPath, buildExplorerTempFileName(sourcePath));
+      }
+
+      let shouldCopy = true;
+      if (fs.existsSync(tempPath)) {
+        try {
+          const srcStat = fs.statSync(sourcePath);
+          const dstStat = fs.statSync(tempPath);
+          if (
+            srcStat.size === dstStat.size &&
+            Math.abs(srcStat.mtimeMs - dstStat.mtimeMs) < 5
+          ) {
+            shouldCopy = false;
+          }
+        } catch {
+          shouldCopy = true;
+        }
+      }
+
+      if (shouldCopy) {
+        fs.copyFileSync(sourcePath, tempPath);
+        try {
+          const srcStat = fs.statSync(sourcePath);
+          fs.utimesSync(tempPath, srcStat.atime, srcStat.mtime);
+        } catch {}
+        copiedCount += 1;
+      }
+
+      explorerSelectionSourceMap.set(sourcePath, tempPath);
+      keepTempPaths.add(tempPath);
+    }
+
+    const folderEntries = fs.readdirSync(folderPath, { withFileTypes: true });
+    for (const entry of folderEntries) {
+      const fullPath = path.join(folderPath, entry.name);
+      if (entry.isFile() && !keepTempPaths.has(fullPath)) {
+        deleteFilePermanently(fullPath);
+      }
+    }
+
+    for (const [sourcePath, tempPath] of explorerSelectionSourceMap.entries()) {
+      if (!keepTempPaths.has(tempPath)) {
+        explorerSelectionSourceMap.delete(sourcePath);
+      }
+    }
+
+    return {
+      success: true,
+      folderPath,
+      fileCount: keepTempPaths.size,
+      copiedCount,
+    };
+  } catch (error) {
+    return { error: error.message || "Failed to sync explorer selection" };
+  }
+}
+
+async function openExplorerSelectionFolder(filePaths) {
+  const syncResult = syncExplorerSelectionFolder(filePaths);
+  if (syncResult.error) {
+    return syncResult;
+  }
+
+  const openError = await shell.openPath(syncResult.folderPath);
+  if (openError) {
+    return { error: openError };
+  }
+
+  return {
+    success: true,
+    folderPath: syncResult.folderPath,
+    fileCount: syncResult.fileCount,
+  };
+}
+
+function clearExplorerSelectionFolder() {
+  explorerSelectionSourceMap.clear();
+  if (!fs.existsSync(EXPLORER_SELECTION_FOLDER)) return;
+  try {
+    fs.rmSync(EXPLORER_SELECTION_FOLDER, { recursive: true, force: true });
+  } catch (error) {
+    console.warn("[ExplorerSync] Failed to clear temp folder:", error);
+  }
+}
+
 async function openPrintPicturesDialog(filePaths) {
   try {
     if (process.platform !== "win32") {
@@ -291,7 +458,10 @@ async function listOpenWithApps(filePath) {
       command: String(x.command),
     }));
 
-  const builtIns = [{ id: "__default__", name: "Default application" }];
+  const builtIns = [
+    { id: "__default__", name: "Default application" },
+    { id: WINDOWS_FILE_EXPLORER_APP_ID, name: "Windows file explorer" },
+  ];
   if (isImage) {
     builtIns.push({
       id: "__paint__",
@@ -2005,6 +2175,7 @@ ipcMain.handle("get-open-with-apps", async (event, filePath) => {
           (a) =>
             a.id !== "__default__" &&
             a.id !== "__windows_open_with__" &&
+            a.id !== WINDOWS_FILE_EXPLORER_APP_ID &&
             a.command,
         )
         .map((a) => [a.id, a.command]),
@@ -2018,6 +2189,10 @@ ipcMain.handle("get-open-with-apps", async (event, filePath) => {
   } catch (error) {
     return { error: error.message || "Failed to get app list", apps: [] };
   }
+});
+
+ipcMain.handle("sync-explorer-selection-folder", async (event, filePaths) => {
+  return syncExplorerSelectionFolder(filePaths);
 });
 
 ipcMain.handle("open-files-with-app", async (event, payload) => {
@@ -2062,6 +2237,10 @@ ipcMain.handle("open-files-with-app", async (event, payload) => {
 
     if (appId === "__windows_photos__") {
       return await openWithWindowsPhotos(existingFilePaths);
+    }
+
+    if (appId === WINDOWS_FILE_EXPLORER_APP_ID) {
+      return await openExplorerSelectionFolder(existingFilePaths);
     }
 
     if (!appId || appId === "__default__") {
@@ -3048,6 +3227,8 @@ if (!gotSingleLock) {
   });
 
   app.on("before-quit", async () => {
+    clearExplorerSelectionFolder();
+
     // Close thumbnail window if open
     if (thumbWindow && !thumbWindow.isDestroyed()) {
       try {

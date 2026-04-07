@@ -27,6 +27,9 @@ let selectedOpenWithApp = {
 const openWithPreferenceByType = new Map();
 const pendingUnreadIds = new Map(); // chatId → Set<messageId> tracked client-side
 const AUTO_REFRESH_INTERVAL = 10000; // 10 seconds
+const EXPLORER_SELECTION_SYNC_DEBOUNCE_MS = 120;
+let explorerSelectionSyncTimer = null;
+let lastExplorerSelectionSyncKey = null;
 
 function getSingleTypeFromSet(typeSet) {
   return typeSet && typeSet.size === 1 ? Array.from(typeSet)[0] : null;
@@ -1882,6 +1885,7 @@ function updateSelectionUI() {
   }
 
   updateOpenSelectedButtonLabel();
+  queueExplorerSelectionSync();
 }
 
 function unselectAllFiles() {
@@ -1905,6 +1909,38 @@ function getSelectedOpenableFiles() {
   });
 
   return { filePaths, selectedTypes };
+}
+
+function queueExplorerSelectionSync() {
+  if (explorerSelectionSyncTimer) {
+    clearTimeout(explorerSelectionSyncTimer);
+  }
+
+  explorerSelectionSyncTimer = setTimeout(() => {
+    explorerSelectionSyncTimer = null;
+    void syncExplorerSelectionFolder();
+  }, EXPLORER_SELECTION_SYNC_DEBOUNCE_MS);
+}
+
+async function syncExplorerSelectionFolder(showErrorToast = false) {
+  const { filePaths } = getSelectedOpenableFiles();
+  const normalizedPaths = [...new Set(filePaths.filter(Boolean))].sort();
+  const syncKey = normalizedPaths.join("|");
+
+  if (syncKey === lastExplorerSelectionSyncKey) {
+    return;
+  }
+
+  lastExplorerSelectionSyncKey = syncKey;
+  const result = await window.api.syncExplorerSelectionFolder(normalizedPaths);
+
+  if (result && result.error) {
+    // Allow retry on the next mutation if a sync attempt fails.
+    lastExplorerSelectionSyncKey = null;
+    if (showErrorToast) {
+      showToast(`Explorer sync failed: ${result.error}`, "error");
+    }
+  }
 }
 
 function updateOpenSelectedButtonLabel() {
@@ -2249,6 +2285,7 @@ function closeChat() {
   currentChatId = null;
   currentFiles = [];
   selectedFiles.clear();
+  queueExplorerSelectionSync();
   hideOpenWithDropdown();
 
   // Hide delete button
@@ -2493,6 +2530,7 @@ function switchToLoginScreen() {
   currentChatId = null;
   currentFiles = [];
   selectedFiles.clear();
+  queueExplorerSelectionSync();
   allSelected = false;
   pendingUnreadIds.clear();
   if (newMessageRefreshTimer) {

@@ -67,6 +67,8 @@ contextBridge.exposeInMainWorld("api", {
   getOpenWithApps: (filePath) =>
     ipcRenderer.invoke("get-open-with-apps", filePath),
   openFilesWithApp: (data) => ipcRenderer.invoke("open-files-with-app", data),
+  syncExplorerSelectionFolder: (filePaths) =>
+    ipcRenderer.invoke("sync-explorer-selection-folder", filePaths),
   openPrintPictures: (filePaths) =>
     ipcRenderer.invoke("open-print-pictures", filePaths),
   deleteFiles: (data) => ipcRenderer.invoke("delete-files", data),
