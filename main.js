@@ -807,7 +807,9 @@ function resolveUniqueDownloadTarget(fileName, mimeType) {
 function saveDownloadedMedia({ messageId, fileName, mimeType, base64Data }) {
   const existingPath = resolveDownloadedPath(messageId, fileName);
   if (existingPath) {
-    const size = fs.existsSync(existingPath) ? fs.statSync(existingPath).size : 0;
+    const size = fs.existsSync(existingPath)
+      ? fs.statSync(existingPath).size
+      : 0;
     return {
       localPath: existingPath,
       fileName: path.basename(existingPath),
@@ -1732,7 +1734,10 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
           mime.extension(info.mimeType || "application/octet-stream") || "bin";
         info.fileName = `${info.type || "file"}_${msg.timestamp}.${ext}`;
       }
-      const existingPath = resolveDownloadedPath(msg.id._serialized, info.fileName);
+      const existingPath = resolveDownloadedPath(
+        msg.id._serialized,
+        info.fileName,
+      );
       if (existingPath) {
         info.isDownloaded = true;
         info.localPath = existingPath;
