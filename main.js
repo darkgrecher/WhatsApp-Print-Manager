@@ -8,6 +8,126 @@ const QRCode = require("qrcode");
 const mime = require("mime-types");
 const { autoUpdater } = require("electron-updater");
 
+let Chat = null;
+let MessageCtor = null;
+try {
+  Chat = require("whatsapp-web.js/src/structures/Chat");
+  MessageCtor = require("whatsapp-web.js/src/structures/Message");
+} catch (err) {
+  console.warn(
+    "[Patch] Could not load internal whatsapp-web.js structures for fetchMessages patch:",
+    err.message,
+  );
+}
+
+// WhatsApp Web occasionally changes internal loadEarlierMsgs signatures.
+// Patch fetchMessages once at startup to gracefully handle signature drift.
+let isFetchMessagesPatched = false;
+function patchFetchMessagesForCompat() {
+  if (isFetchMessagesPatched) return;
+
+  const originalFetchMessages = Chat?.prototype?.fetchMessages;
+  if (typeof originalFetchMessages !== "function" || !MessageCtor) return;
+
+  Chat.prototype.fetchMessages = async function patchedFetchMessages(
+    searchOptions,
+  ) {
+    const options = searchOptions || {};
+
+    const messages = await this.client.pupPage.evaluate(
+      async (chatId, searchOptions) => {
+        const msgFilter = (m) => {
+          if (m?.isNotification) return false;
+          if (
+            searchOptions &&
+            searchOptions.fromMe !== undefined &&
+            m?.id?.fromMe !== searchOptions.fromMe
+          ) {
+            return false;
+          }
+          return true;
+        };
+
+        const chat = await window.WWebJS.getChat(chatId, {
+          getAsModel: false,
+        });
+        if (!chat) return [];
+
+        let msgs = chat.msgs?.getModelsArray?.().filter(msgFilter) || [];
+        const requestedLimit = Number(searchOptions?.limit);
+        const shouldLoadMore = Number.isFinite(requestedLimit) && requestedLimit > 0;
+
+        if (shouldLoadMore) {
+          const convMsgs = window.Store?.ConversationMsgs;
+          const loadEarlierMsgs = convMsgs?.loadEarlierMsgs;
+
+          if (typeof loadEarlierMsgs === "function") {
+            // Keep a hard ceiling to avoid infinite loops if WhatsApp internals regress.
+            const maxIterations = Math.min(
+              50,
+              Math.max(5, Math.ceil(requestedLimit / 20) + 5),
+            );
+
+            for (let i = 0; i < maxIterations && msgs.length < requestedLimit; i++) {
+              let loadedMessages = null;
+
+              // Try multiple signatures to stay compatible across WhatsApp Web updates.
+              const attempts = [
+                () =>
+                  loadEarlierMsgs.call(convMsgs, chat, chat.msgs, {
+                    waitForChatLoading: false,
+                  }),
+                () =>
+                  loadEarlierMsgs.call(convMsgs, chat, chat.msgs, {
+                    waitForChatLoading: true,
+                  }),
+                () =>
+                  loadEarlierMsgs.call(convMsgs, chat, {
+                    waitForChatLoading: false,
+                  }),
+                () => loadEarlierMsgs.call(convMsgs, chat, chat.msgs),
+                () => loadEarlierMsgs.call(convMsgs, chat),
+              ];
+
+              for (const attempt of attempts) {
+                try {
+                  const candidate = await attempt();
+                  if (Array.isArray(candidate)) {
+                    loadedMessages = candidate;
+                    break;
+                  }
+                } catch (_) {}
+              }
+
+              if (!Array.isArray(loadedMessages) || loadedMessages.length === 0) {
+                break;
+              }
+
+              msgs = [...loadedMessages.filter(msgFilter), ...msgs];
+            }
+          }
+
+          if (msgs.length > requestedLimit) {
+            msgs.sort((a, b) => ((a?.t || 0) > (b?.t || 0) ? 1 : -1));
+            msgs = msgs.slice(msgs.length - requestedLimit);
+          }
+        }
+
+        return msgs.map((m) => window.WWebJS.getMessageModel(m));
+      },
+      this.id._serialized,
+      options,
+    );
+
+    return (messages || []).map((m) => new MessageCtor(this.client, m));
+  };
+
+  isFetchMessagesPatched = true;
+  console.log("[Patch] Applied fetchMessages compatibility patch");
+}
+
+patchFetchMessagesForCompat();
+
 // ── Globals ──────────────────────────────────────────────────────────────────
 let mainWindow;
 let updateWindow;
@@ -1357,6 +1477,194 @@ async function retryOnDetachedFrame(fn, retries = 3) {
   }
 }
 
+/**
+ * Prime WhatsApp Web chat history cache so first-open chats are not limited to
+ * only the most recent in-memory message.
+ */
+async function primeChatHistoryForFetch(chatId) {
+  const startedAt = Date.now();
+
+  // Ask server-side history sync first (best effort, can be a no-op).
+  try {
+    await withTimeout(
+      retryOnDetachedFrame(() => whatsappClient.syncHistory(chatId)),
+      3500,
+      false,
+    );
+  } catch (_) {}
+
+  // Then force-open + nudge earlier-load in WA store (best effort).
+  try {
+    const stats = await withTimeout(
+      retryOnDetachedFrame(() =>
+        whatsappClient.pupPage.evaluate(async (cid) => {
+          const chat = await window.WWebJS.getChat(cid, { getAsModel: false });
+          if (!chat) return null;
+
+          const getCount = () => chat.msgs?.getModelsArray?.().length || 0;
+          const before = getCount();
+
+          try {
+            await window.Store?.Cmd?.openChatAt?.(chat);
+          } catch (_) {}
+          try {
+            await window.Store?.Cmd?.openChatBottom?.({ chat });
+          } catch (_) {}
+
+          const convMsgs = window.Store?.ConversationMsgs;
+          const loadEarlierMsgs = convMsgs?.loadEarlierMsgs;
+          if (typeof loadEarlierMsgs === "function") {
+            const attempts = [
+              () => loadEarlierMsgs.call(convMsgs, chat, { waitForChatLoading: true }),
+              () => loadEarlierMsgs.call(convMsgs, chat, chat.msgs, { waitForChatLoading: true }),
+              () => loadEarlierMsgs.call(convMsgs, chat, { waitForChatLoading: false }),
+              () => loadEarlierMsgs.call(convMsgs, chat, chat.msgs, { waitForChatLoading: false }),
+              () => loadEarlierMsgs.call(convMsgs, chat, chat.msgs),
+              () => loadEarlierMsgs.call(convMsgs, chat),
+            ];
+
+            for (const attempt of attempts) {
+              try {
+                await attempt();
+                // Wait up to 3 seconds for messages to actually load into the models array
+                let checks = 0;
+                while (getCount() <= before && checks < 15) {
+                  await new Promise((r) => setTimeout(r, 200));
+                  checks++;
+                }
+                if (getCount() > before) break;
+              } catch (_) {}
+            }
+          }
+
+          const after = getCount();
+          return { before, after };
+        }, chatId),
+      ),
+      5000,
+      null,
+    );
+
+    if (stats) {
+      console.log(
+        `[Files] history prime in ${Date.now() - startedAt}ms — msgs ${stats.before} -> ${stats.after}`,
+      );
+    }
+  } catch (err) {
+    console.warn("[Files] history prime failed:", err.message);
+  }
+}
+
+/**
+ * Compatibility fallback for loading printable chat messages directly from
+ * WhatsApp Web store internals. Used when whatsapp-web.js fetchMessages breaks
+ * due upstream internal API changes.
+ */
+async function fetchPrintableRawMessagesCompat(chatId, limit = 100) {
+  return await retryOnDetachedFrame(() =>
+    whatsappClient.pupPage.evaluate(async (cid, requestedLimit) => {
+      const chat = window.Store?.Chat?.get?.(cid);
+      if (!chat) return [];
+
+      const ALLOWED_TYPES = ["chat", "image", "document", "ptt", "audio"];
+      const msgFilter = (m) =>
+        m && !m.isNotification && (m.hasMedia || ALLOWED_TYPES.includes(m.type));
+
+      let msgs = (chat.msgs?.getModelsArray?.() || []).filter(msgFilter);
+
+      const convMsgs = window.Store?.ConversationMsgs;
+      const loadEarlierMsgs = convMsgs?.loadEarlierMsgs;
+      const targetLimit = Number(requestedLimit) > 0 ? Number(requestedLimit) : 0;
+
+      if (targetLimit > 0 && typeof loadEarlierMsgs === "function") {
+        const maxIterations = Math.min(
+          50,
+          Math.max(5, Math.ceil(targetLimit / 20) + 5),
+        );
+
+        for (let i = 0; i < maxIterations && msgs.length < targetLimit; i++) {
+          const beforeLen = msgs.length;
+          let loaded = false;
+
+          const attempts = [
+            () =>
+              loadEarlierMsgs.call(convMsgs, chat, {
+                waitForChatLoading: false,
+              }),
+            () =>
+              loadEarlierMsgs.call(convMsgs, chat, chat.msgs, {
+                waitForChatLoading: false,
+              }),
+            () =>
+              loadEarlierMsgs.call(convMsgs, chat, {
+                waitForChatLoading: true,
+              }),
+            () =>
+              loadEarlierMsgs.call(convMsgs, chat, chat.msgs, {
+                waitForChatLoading: true,
+              }),
+            () => loadEarlierMsgs.call(convMsgs, chat, chat.msgs),
+            () => loadEarlierMsgs.call(convMsgs, chat),
+          ];
+
+          for (const attempt of attempts) {
+            try {
+              await attempt();
+              loaded = true;
+              break;
+            } catch (_) {}
+          }
+
+          if (!loaded) break;
+
+          msgs = (chat.msgs?.getModelsArray?.() || []).filter(msgFilter);
+          if (msgs.length <= beforeLen) break;
+        }
+      }
+
+      msgs.sort((a, b) => (a.t || 0) - (b.t || 0));
+      if (targetLimit > 0 && msgs.length > targetLimit) {
+        msgs = msgs.slice(msgs.length - targetLimit);
+      }
+
+      const chatName =
+        chat.name ||
+        chat.contact?.pushname ||
+        chat.contact?.name ||
+        chat.formattedTitle ||
+        null;
+
+      return msgs
+        .map((m) => {
+          const isFromMe = m.id?.fromMe || m.fromMe;
+          let sender = null;
+          if (!isFromMe) {
+            sender =
+              m.notifyName ||
+              m._data?.notifyName ||
+              m.senderObj?.pushname ||
+              m.senderObj?.name ||
+              m.pushName ||
+              m._data?.pushName ||
+              chatName;
+          }
+          return {
+            id: m.id?._serialized,
+            type: m.type || "chat",
+            timestamp: m.t || 0,
+            body: m.body || m.caption || "",
+            sender,
+            fromMe: isFromMe,
+            fileName: m.filename || m.mediaFilename || null,
+            mimeType: m.mimetype || null,
+            fileSize: m.size || m.filesize || null,
+          };
+        })
+        .filter((m) => m.id);
+    }, chatId, limit),
+  );
+}
+
 // Get all chats
 ipcMain.handle("get-unread-chats", async () => {
   if (!isClientReady) return { error: "WhatsApp not ready" };
@@ -1784,6 +2092,8 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
     setImmediate(async () => {
       const FILE_BATCH_SIZE = 10;
       try {
+        await primeChatHistoryForFetch(chatId);
+
         // 1. Send older in-memory files immediately (no network required)
         if (olderStoreFiles.length > 0) {
           for (let i = 0; i < olderStoreFiles.length; i += FILE_BATCH_SIZE) {
@@ -1797,6 +2107,7 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
 
         // 2. Fetch from server to surface messages not yet loaded in memory
         let serverMessages = [];
+        let serverRawMessages = [];
         try {
           const chat = await retryOnDetachedFrame(() =>
             whatsappClient.getChatById(chatId),
@@ -1811,18 +2122,43 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
           console.warn("[Files] fetchMessages failed:", e.message);
         }
 
+        // Always run compat fetch too: fetchMessages may silently return only
+        // already-loaded models (e.g. 1 newest message) without throwing.
+        try {
+          serverRawMessages = await fetchPrintableRawMessagesCompat(chatId, 100);
+          console.log(
+            `[Files] compat store fetch done in ${Date.now() - _t0}ms — ${serverRawMessages.length} fallback msgs`,
+          );
+        } catch (compatErr) {
+          console.warn("[Files] compat store fetch failed:", compatErr.message);
+        }
+
         // 3. Only process messages not already shown from the in-memory store.
         // Include: text messages, voice notes, images, and documents (no video)
         const ALLOWED_TYPES = ["chat", "image", "document", "ptt", "audio"];
-        const newMediaMsgs = serverMessages
+        const newFilesFromServer = serverMessages
           .filter(
             (m) =>
               (m.hasMedia || ALLOWED_TYPES.includes(m.type)) &&
               !sentIds.has(m.id._serialized),
           )
-          .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+          .map(extractFileInfo);
 
-        const newFiles = newMediaMsgs.map(extractFileInfo);
+        const newFilesFromCompat = serverRawMessages
+          .filter(
+            (m) => ALLOWED_TYPES.includes(m.type) && !sentIds.has(m.id),
+          )
+          .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+          .map(extractFromRaw);
+
+        // Merge both sources by messageId; prefer server-derived records when both exist.
+        const newFilesById = new Map();
+        newFilesFromCompat.forEach((f) => newFilesById.set(f.messageId, f));
+        newFilesFromServer.forEach((f) => newFilesById.set(f.messageId, f));
+        const newFiles = [...newFilesById.values()].sort(
+          (a, b) => (b.timestamp || 0) - (a.timestamp || 0),
+        );
 
         if (newFiles.length > 0) {
           for (let i = 0; i < newFiles.length; i += FILE_BATCH_SIZE) {
@@ -1849,52 +2185,54 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         //    causing Phase 1 to report isDownloaded=false even when the file is
         //    already on disk.  Phase 2 skips those messages via sentIds, so no
         //    correction ever reaches the renderer.  We fix that here.
-        const allPrintable = serverMessages.filter(
-          (m) => m.hasMedia || ALLOWED_TYPES.includes(m.type),
-        );
-        for (const msg of allPrintable) {
-          const info = extractFileInfo(msg);
-          const wasInPhase1 = sentIds.has(info.messageId);
+        if (serverMessages.length > 0) {
+          const allPrintable = serverMessages.filter(
+            (m) => m.hasMedia || ALLOWED_TYPES.includes(m.type),
+          );
+          for (const msg of allPrintable) {
+            const info = extractFileInfo(msg);
+            const wasInPhase1 = sentIds.has(info.messageId);
 
-          if (info.isDownloaded && wasInPhase1) {
-            // Correct a Phase-1 false-negative (filename capitalisation mismatch)
-            mainWindow?.webContents.send("whatsapp:file-auto-downloaded", {
-              chatId,
-              messageId: info.messageId,
-              localPath: info.localPath,
-              fileName: info.fileName,
-            });
-          } else if (!info.isDownloaded && unreadMsgIds.has(info.messageId)) {
-            // Unread file not on disk — download it now so it can be selected.
-            try {
-              const media = await msg.downloadMedia();
-              if (!media) continue;
-              let finalFileName =
-                msg._data?.fileName ||
-                msg._data?.filename ||
-                media.filename ||
-                null;
-              if (!finalFileName) {
-                const ext = mime.extension(media.mimetype) || "bin";
-                finalFileName = `${msg.type || "file"}_${msg.timestamp}.${ext}`;
-              }
-              const saved = saveDownloadedMedia({
-                messageId: msg.id._serialized,
-                fileName: finalFileName,
-                mimeType: media.mimetype,
-                base64Data: media.data,
-              });
+            if (info.isDownloaded && wasInPhase1) {
+              // Correct a Phase-1 false-negative (filename capitalisation mismatch)
               mainWindow?.webContents.send("whatsapp:file-auto-downloaded", {
                 chatId,
-                messageId: msg.id._serialized,
-                localPath: saved.localPath,
-                fileName: saved.fileName,
+                messageId: info.messageId,
+                localPath: info.localPath,
+                fileName: info.fileName,
               });
-            } catch (e) {
-              console.warn(
-                `[Files] Auto-download failed for ${msg.id._serialized}:`,
-                e.message,
-              );
+            } else if (!info.isDownloaded && unreadMsgIds.has(info.messageId)) {
+              // Unread file not on disk — download it now so it can be selected.
+              try {
+                const media = await msg.downloadMedia();
+                if (!media) continue;
+                let finalFileName =
+                  msg._data?.fileName ||
+                  msg._data?.filename ||
+                  media.filename ||
+                  null;
+                if (!finalFileName) {
+                  const ext = mime.extension(media.mimetype) || "bin";
+                  finalFileName = `${msg.type || "file"}_${msg.timestamp}.${ext}`;
+                }
+                const saved = saveDownloadedMedia({
+                  messageId: msg.id._serialized,
+                  fileName: finalFileName,
+                  mimeType: media.mimetype,
+                  base64Data: media.data,
+                });
+                mainWindow?.webContents.send("whatsapp:file-auto-downloaded", {
+                  chatId,
+                  messageId: msg.id._serialized,
+                  localPath: saved.localPath,
+                  fileName: saved.fileName,
+                });
+              } catch (e) {
+                console.warn(
+                  `[Files] Auto-download failed for ${msg.id._serialized}:`,
+                  e.message,
+                );
+              }
             }
           }
         }
@@ -1907,20 +2245,22 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
           "ptt",
           "audio",
         ];
-        const allWWJSMedia = serverMessages.filter(
-          (m) => m.hasMedia || ALLOWED_TYPES_FOR_SENDER.includes(m.type),
-        );
-        for (const msg of allWWJSMedia) {
-          try {
-            const contact = await msg.getContact();
-            const name =
-              contact.pushname || contact.name || contact.number || "Unknown";
-            mainWindow?.webContents.send("whatsapp:file-sender-resolved", {
-              chatId,
-              messageId: msg.id._serialized,
-              sender: name,
-            });
-          } catch (e) {}
+        if (serverMessages.length > 0) {
+          const allWWJSMedia = serverMessages.filter(
+            (m) => m.hasMedia || ALLOWED_TYPES_FOR_SENDER.includes(m.type),
+          );
+          for (const msg of allWWJSMedia) {
+            try {
+              const contact = await msg.getContact();
+              const name =
+                contact.pushname || contact.name || contact.number || "Unknown";
+              mainWindow?.webContents.send("whatsapp:file-sender-resolved", {
+                chatId,
+                messageId: msg.id._serialized,
+                sender: name,
+              });
+            } catch (e) {}
+          }
         }
       } catch (err) {
         console.error("[Files] Background task failed:", err.message);
