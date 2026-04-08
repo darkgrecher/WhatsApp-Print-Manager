@@ -257,7 +257,7 @@ function setupEventListeners() {
 
     switch (status) {
       case "launching":
-        setQrStatus("Starting browser...");
+        setQrStatus("Starting ...");
         startInitTimer();
         break;
       case "qr_ready":
