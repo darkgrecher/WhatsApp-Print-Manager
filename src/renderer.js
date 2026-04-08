@@ -1784,7 +1784,9 @@ function getNonImageFileTypeLabel(file) {
     : "";
 
   const isImage =
-    mimeType.includes("image") || type === "image" || getFileType(fileName) === "image";
+    mimeType.includes("image") ||
+    type === "image" ||
+    getFileType(fileName) === "image";
   if (isImage) return "";
 
   if (extension) return extension.toUpperCase();
