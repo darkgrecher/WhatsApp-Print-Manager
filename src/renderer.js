@@ -1380,6 +1380,7 @@ async function selectChat(chatId, chatName) {
 // ── Render File List ─────────────────────────────────────────────────────
 function renderFileItem(file) {
   const iconInfo = getFileIcon(file);
+  const nonImageTypeLabel = getNonImageFileTypeLabel(file);
   const isChecked = selectedFiles.has(file.messageId) ? "checked" : "";
   const isSelected = selectedFiles.has(file.messageId) ? "selected" : "";
   const time = formatTime(file.timestamp);
@@ -1460,11 +1461,13 @@ function renderFileItem(file) {
     <div class="file-item ${isSelected} ${unreadClass} ${fromMeClass}" data-message-id="${escapeHtml(file.messageId)}" id="file-${safeMsgId}">
       <input type="checkbox" class="file-checkbox" ${isChecked} 
         data-action="toggle-select" data-msg-id="${escapeHtml(file.messageId)}" />
-      <div class="file-icon ${iconInfo.class}">${iconInfo.icon}</div>
+      <div class="file-icon ${iconInfo.class}${nonImageTypeLabel ? " file-icon-has-label" : ""}">
+        ${iconInfo.icon}
+        ${nonImageTypeLabel ? `<span class="file-icon-type-label">${escapeHtml(nonImageTypeLabel)}</span>` : ""}
+      </div>
       <div class="file-details">
         <div class="file-name" title="${escapeHtml(file.fileName || "Unknown file")}">${escapeHtml(file.fileName || "Unknown file")}</div>
         <div class="file-meta">
-          <span>${file.type || "file"}</span>
           ${size ? `<span>${size}</span>` : ""}
           <span>${time}</span>
           <span>From: ${escapeHtml(senderName)}</span>
@@ -1768,6 +1771,31 @@ function getFileType(fileName) {
   if (ext === "pdf") return "pdf";
   if (imageExts.includes(ext)) return "image";
   return ext;
+}
+
+function getNonImageFileTypeLabel(file) {
+  if (!file) return "FILE";
+
+  const fileName = String(file.fileName || "");
+  const mimeType = String(file.mimeType || "").toLowerCase();
+  const type = String(file.type || "").toLowerCase();
+  const extension = fileName.includes(".")
+    ? fileName.split(".").pop().trim().toLowerCase()
+    : "";
+
+  const isImage =
+    mimeType.includes("image") || type === "image" || getFileType(fileName) === "image";
+  if (isImage) return "";
+
+  if (extension) return extension.toUpperCase();
+  if (type && type !== "unknown") return type.toUpperCase();
+
+  if (mimeType) {
+    const mimeLeaf = mimeType.split("/").pop().split(";")[0].trim();
+    if (mimeLeaf) return mimeLeaf.toUpperCase();
+  }
+
+  return "FILE";
 }
 
 function isSelectableMediaFile(file) {
