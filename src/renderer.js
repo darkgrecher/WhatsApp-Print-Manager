@@ -478,7 +478,6 @@ function setupEventListeners() {
         fileList.innerHTML = `<div class="empty-state"><p>No media files found in this chat</p></div>`;
         document.getElementById("file-count").textContent = "0 files";
       }
-
     }
   });
 
