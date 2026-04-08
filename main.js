@@ -55,7 +55,8 @@ function patchFetchMessagesForCompat() {
 
         let msgs = chat.msgs?.getModelsArray?.().filter(msgFilter) || [];
         const requestedLimit = Number(searchOptions?.limit);
-        const shouldLoadMore = Number.isFinite(requestedLimit) && requestedLimit > 0;
+        const shouldLoadMore =
+          Number.isFinite(requestedLimit) && requestedLimit > 0;
 
         if (shouldLoadMore) {
           const convMsgs = window.Store?.ConversationMsgs;
@@ -68,7 +69,11 @@ function patchFetchMessagesForCompat() {
               Math.max(5, Math.ceil(requestedLimit / 20) + 5),
             );
 
-            for (let i = 0; i < maxIterations && msgs.length < requestedLimit; i++) {
+            for (
+              let i = 0;
+              i < maxIterations && msgs.length < requestedLimit;
+              i++
+            ) {
               let loadedMessages = null;
 
               // Try multiple signatures to stay compatible across WhatsApp Web updates.
@@ -99,7 +104,10 @@ function patchFetchMessagesForCompat() {
                 } catch (_) {}
               }
 
-              if (!Array.isArray(loadedMessages) || loadedMessages.length === 0) {
+              if (
+                !Array.isArray(loadedMessages) ||
+                loadedMessages.length === 0
+              ) {
                 break;
               }
 
@@ -1515,10 +1523,22 @@ async function primeChatHistoryForFetch(chatId) {
           const loadEarlierMsgs = convMsgs?.loadEarlierMsgs;
           if (typeof loadEarlierMsgs === "function") {
             const attempts = [
-              () => loadEarlierMsgs.call(convMsgs, chat, { waitForChatLoading: true }),
-              () => loadEarlierMsgs.call(convMsgs, chat, chat.msgs, { waitForChatLoading: true }),
-              () => loadEarlierMsgs.call(convMsgs, chat, { waitForChatLoading: false }),
-              () => loadEarlierMsgs.call(convMsgs, chat, chat.msgs, { waitForChatLoading: false }),
+              () =>
+                loadEarlierMsgs.call(convMsgs, chat, {
+                  waitForChatLoading: true,
+                }),
+              () =>
+                loadEarlierMsgs.call(convMsgs, chat, chat.msgs, {
+                  waitForChatLoading: true,
+                }),
+              () =>
+                loadEarlierMsgs.call(convMsgs, chat, {
+                  waitForChatLoading: false,
+                }),
+              () =>
+                loadEarlierMsgs.call(convMsgs, chat, chat.msgs, {
+                  waitForChatLoading: false,
+                }),
               () => loadEarlierMsgs.call(convMsgs, chat, chat.msgs),
               () => loadEarlierMsgs.call(convMsgs, chat),
             ];
@@ -1562,106 +1582,113 @@ async function primeChatHistoryForFetch(chatId) {
  */
 async function fetchPrintableRawMessagesCompat(chatId, limit = 100) {
   return await retryOnDetachedFrame(() =>
-    whatsappClient.pupPage.evaluate(async (cid, requestedLimit) => {
-      const chat = window.Store?.Chat?.get?.(cid);
-      if (!chat) return [];
+    whatsappClient.pupPage.evaluate(
+      async (cid, requestedLimit) => {
+        const chat = window.Store?.Chat?.get?.(cid);
+        if (!chat) return [];
 
-      const ALLOWED_TYPES = ["chat", "image", "document", "ptt", "audio"];
-      const msgFilter = (m) =>
-        m && !m.isNotification && (m.hasMedia || ALLOWED_TYPES.includes(m.type));
+        const ALLOWED_TYPES = ["chat", "image", "document", "ptt", "audio"];
+        const msgFilter = (m) =>
+          m &&
+          !m.isNotification &&
+          (m.hasMedia || ALLOWED_TYPES.includes(m.type));
 
-      let msgs = (chat.msgs?.getModelsArray?.() || []).filter(msgFilter);
+        let msgs = (chat.msgs?.getModelsArray?.() || []).filter(msgFilter);
 
-      const convMsgs = window.Store?.ConversationMsgs;
-      const loadEarlierMsgs = convMsgs?.loadEarlierMsgs;
-      const targetLimit = Number(requestedLimit) > 0 ? Number(requestedLimit) : 0;
+        const convMsgs = window.Store?.ConversationMsgs;
+        const loadEarlierMsgs = convMsgs?.loadEarlierMsgs;
+        const targetLimit =
+          Number(requestedLimit) > 0 ? Number(requestedLimit) : 0;
 
-      if (targetLimit > 0 && typeof loadEarlierMsgs === "function") {
-        const maxIterations = Math.min(
-          50,
-          Math.max(5, Math.ceil(targetLimit / 20) + 5),
-        );
+        if (targetLimit > 0 && typeof loadEarlierMsgs === "function") {
+          const maxIterations = Math.min(
+            50,
+            Math.max(5, Math.ceil(targetLimit / 20) + 5),
+          );
 
-        for (let i = 0; i < maxIterations && msgs.length < targetLimit; i++) {
-          const beforeLen = msgs.length;
-          let loaded = false;
+          for (let i = 0; i < maxIterations && msgs.length < targetLimit; i++) {
+            const beforeLen = msgs.length;
+            let loaded = false;
 
-          const attempts = [
-            () =>
-              loadEarlierMsgs.call(convMsgs, chat, {
-                waitForChatLoading: false,
-              }),
-            () =>
-              loadEarlierMsgs.call(convMsgs, chat, chat.msgs, {
-                waitForChatLoading: false,
-              }),
-            () =>
-              loadEarlierMsgs.call(convMsgs, chat, {
-                waitForChatLoading: true,
-              }),
-            () =>
-              loadEarlierMsgs.call(convMsgs, chat, chat.msgs, {
-                waitForChatLoading: true,
-              }),
-            () => loadEarlierMsgs.call(convMsgs, chat, chat.msgs),
-            () => loadEarlierMsgs.call(convMsgs, chat),
-          ];
+            const attempts = [
+              () =>
+                loadEarlierMsgs.call(convMsgs, chat, {
+                  waitForChatLoading: false,
+                }),
+              () =>
+                loadEarlierMsgs.call(convMsgs, chat, chat.msgs, {
+                  waitForChatLoading: false,
+                }),
+              () =>
+                loadEarlierMsgs.call(convMsgs, chat, {
+                  waitForChatLoading: true,
+                }),
+              () =>
+                loadEarlierMsgs.call(convMsgs, chat, chat.msgs, {
+                  waitForChatLoading: true,
+                }),
+              () => loadEarlierMsgs.call(convMsgs, chat, chat.msgs),
+              () => loadEarlierMsgs.call(convMsgs, chat),
+            ];
 
-          for (const attempt of attempts) {
-            try {
-              await attempt();
-              loaded = true;
-              break;
-            } catch (_) {}
+            for (const attempt of attempts) {
+              try {
+                await attempt();
+                loaded = true;
+                break;
+              } catch (_) {}
+            }
+
+            if (!loaded) break;
+
+            msgs = (chat.msgs?.getModelsArray?.() || []).filter(msgFilter);
+            if (msgs.length <= beforeLen) break;
           }
-
-          if (!loaded) break;
-
-          msgs = (chat.msgs?.getModelsArray?.() || []).filter(msgFilter);
-          if (msgs.length <= beforeLen) break;
         }
-      }
 
-      msgs.sort((a, b) => (a.t || 0) - (b.t || 0));
-      if (targetLimit > 0 && msgs.length > targetLimit) {
-        msgs = msgs.slice(msgs.length - targetLimit);
-      }
+        msgs.sort((a, b) => (a.t || 0) - (b.t || 0));
+        if (targetLimit > 0 && msgs.length > targetLimit) {
+          msgs = msgs.slice(msgs.length - targetLimit);
+        }
 
-      const chatName =
-        chat.name ||
-        chat.contact?.pushname ||
-        chat.contact?.name ||
-        chat.formattedTitle ||
-        null;
+        const chatName =
+          chat.name ||
+          chat.contact?.pushname ||
+          chat.contact?.name ||
+          chat.formattedTitle ||
+          null;
 
-      return msgs
-        .map((m) => {
-          const isFromMe = m.id?.fromMe || m.fromMe;
-          let sender = null;
-          if (!isFromMe) {
-            sender =
-              m.notifyName ||
-              m._data?.notifyName ||
-              m.senderObj?.pushname ||
-              m.senderObj?.name ||
-              m.pushName ||
-              m._data?.pushName ||
-              chatName;
-          }
-          return {
-            id: m.id?._serialized,
-            type: m.type || "chat",
-            timestamp: m.t || 0,
-            body: m.body || m.caption || "",
-            sender,
-            fromMe: isFromMe,
-            fileName: m.filename || m.mediaFilename || null,
-            mimeType: m.mimetype || null,
-            fileSize: m.size || m.filesize || null,
-          };
-        })
-        .filter((m) => m.id);
-    }, chatId, limit),
+        return msgs
+          .map((m) => {
+            const isFromMe = m.id?.fromMe || m.fromMe;
+            let sender = null;
+            if (!isFromMe) {
+              sender =
+                m.notifyName ||
+                m._data?.notifyName ||
+                m.senderObj?.pushname ||
+                m.senderObj?.name ||
+                m.pushName ||
+                m._data?.pushName ||
+                chatName;
+            }
+            return {
+              id: m.id?._serialized,
+              type: m.type || "chat",
+              timestamp: m.t || 0,
+              body: m.body || m.caption || "",
+              sender,
+              fromMe: isFromMe,
+              fileName: m.filename || m.mediaFilename || null,
+              mimeType: m.mimetype || null,
+              fileSize: m.size || m.filesize || null,
+            };
+          })
+          .filter((m) => m.id);
+      },
+      chatId,
+      limit,
+    ),
   );
 }
 
@@ -2125,7 +2152,10 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
         // Always run compat fetch too: fetchMessages may silently return only
         // already-loaded models (e.g. 1 newest message) without throwing.
         try {
-          serverRawMessages = await fetchPrintableRawMessagesCompat(chatId, 100);
+          serverRawMessages = await fetchPrintableRawMessagesCompat(
+            chatId,
+            100,
+          );
           console.log(
             `[Files] compat store fetch done in ${Date.now() - _t0}ms — ${serverRawMessages.length} fallback msgs`,
           );
@@ -2146,9 +2176,7 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
           .map(extractFileInfo);
 
         const newFilesFromCompat = serverRawMessages
-          .filter(
-            (m) => ALLOWED_TYPES.includes(m.type) && !sentIds.has(m.id),
-          )
+          .filter((m) => ALLOWED_TYPES.includes(m.type) && !sentIds.has(m.id))
           .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
           .map(extractFromRaw);
 
