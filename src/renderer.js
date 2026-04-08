@@ -1362,9 +1362,7 @@ async function selectChat(chatId, chatName, options = {}) {
   updateSelectionUI();
 
   const shouldAutoReclick =
-    allowAutoReclick &&
-    unreadInMemoryCount === 0 &&
-    olderInMemoryCount === 1;
+    allowAutoReclick && unreadInMemoryCount === 0 && olderInMemoryCount === 1;
   if (shouldAutoReclick) {
     console.log(
       `[selectChat] auto re-click scheduled for ${chatId} (0 unread, 1 older in memory)`,
