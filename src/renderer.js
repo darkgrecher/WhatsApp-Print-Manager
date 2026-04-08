@@ -479,8 +479,6 @@ function setupEventListeners() {
         document.getElementById("file-count").textContent = "0 files";
       }
 
-      // Load thumbnails for any new PDF files
-      loadDocumentThumbnails();
     }
   });
 
@@ -1353,7 +1351,6 @@ async function selectChat(chatId, chatName) {
   }
 
   updateSelectionUI();
-  loadDocumentThumbnails();
 
   // Scroll to unread divider if present, otherwise to bottom (newest messages)
   setTimeout(() => {
@@ -1735,7 +1732,6 @@ function renderFiles() {
 
   fileList.innerHTML = html;
   attachFileEventListeners(fileList);
-  loadDocumentThumbnails();
 
   // Scroll to unread divider if present, otherwise to bottom
   setTimeout(() => {
@@ -1762,38 +1758,6 @@ function handleFileAction(e) {
     case "download-file":
       downloadSingleFile(el.dataset.msgId, el.dataset.filename);
       break;
-  }
-}
-
-// ── Document Thumbnail Loading ───────────────────────────────────────────
-async function loadDocumentThumbnails() {
-  const pdfFiles = currentFiles.filter((f) => {
-    const fn = (f.fileName || "").toLowerCase();
-    const mt = (f.mimeType || "").toLowerCase();
-    return (
-      f.isDownloaded &&
-      f.localPath &&
-      (fn.endsWith(".pdf") || mt.includes("pdf"))
-    );
-  });
-
-  for (const file of pdfFiles) {
-    const safeMsgId = file.messageId.replace(/[^a-zA-Z0-9]/g, "_");
-    const iconEl = document.querySelector(`#file-${safeMsgId} .file-icon`);
-    if (!iconEl) continue;
-
-    // Skip if already has a thumbnail image
-    if (iconEl.querySelector(".file-thumbnail")) continue;
-
-    try {
-      const result = await window.api.generateThumbnail(file.localPath);
-      if (result && result.thumbnailPath) {
-        const url = "file:///" + result.thumbnailPath.replace(/\\/g, "/");
-        iconEl.innerHTML = `<img class="file-thumbnail" src="${escapeHtml(url)}" alt="Preview" />`;
-      }
-    } catch (err) {
-      console.error("Thumbnail load failed for", file.fileName, err);
-    }
   }
 }
 
