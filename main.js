@@ -2306,6 +2306,8 @@ ipcMain.handle("get-chat-files", async (event, chatId, trackedUnreadIds) => {
     return {
       files: unreadFiles,
       unreadCount,
+      unreadInMemoryCount: unreadFiles.length,
+      olderInMemoryCount: olderStoreFiles.length,
       // Always true — background always runs to fetch additional server data.
       // Renderer handles empty-state via onChatFilesBatch done+empty check.
       hasOlderFiles: true,

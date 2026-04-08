@@ -26,6 +26,7 @@ let selectedOpenWithApp = {
 };
 const openWithPreferenceByType = new Map();
 const pendingUnreadIds = new Map(); // chatId → Set<messageId> tracked client-side
+let autoReclickTimer = null;
 const AUTO_REFRESH_INTERVAL = 10000; // 10 seconds
 const EXPLORER_SELECTION_SYNC_DEBOUNCE_MS = 120;
 let explorerSelectionSyncTimer = null;
@@ -1222,7 +1223,14 @@ async function refreshChats() {
 }
 
 // ── Select Chat & Load Files ─────────────────────────────────────────────
-async function selectChat(chatId, chatName) {
+async function selectChat(chatId, chatName, options = {}) {
+  const allowAutoReclick = options.allowAutoReclick !== false;
+
+  if (autoReclickTimer) {
+    clearTimeout(autoReclickTimer);
+    autoReclickTimer = null;
+  }
+
   currentChatId = chatId;
   selectedFiles.clear();
   updateSelectionUI();
@@ -1272,6 +1280,8 @@ async function selectChat(chatId, chatName) {
 
   const unreadFiles = result.files || [];
   const hasOlderFiles = result.hasOlderFiles || false;
+  const unreadInMemoryCount = Number(result.unreadInMemoryCount || 0);
+  const olderInMemoryCount = Number(result.olderInMemoryCount || 0);
 
   currentFiles = [...unreadFiles];
 
@@ -1350,6 +1360,21 @@ async function selectChat(chatId, chatName) {
   }
 
   updateSelectionUI();
+
+  const shouldAutoReclick =
+    allowAutoReclick &&
+    unreadInMemoryCount === 0 &&
+    olderInMemoryCount === 1;
+  if (shouldAutoReclick) {
+    console.log(
+      `[selectChat] auto re-click scheduled for ${chatId} (0 unread, 1 older in memory)`,
+    );
+    autoReclickTimer = setTimeout(() => {
+      autoReclickTimer = null;
+      if (currentChatId !== chatId) return;
+      selectChat(chatId, chatName, { allowAutoReclick: false });
+    }, 500);
+  }
 
   // Scroll to unread divider if present, otherwise to bottom (newest messages)
   setTimeout(() => {
