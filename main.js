@@ -605,10 +605,7 @@ async function listOpenWithApps(filePath) {
       command: String(x.command),
     }));
 
-  const builtIns = [
-    { id: "__default__", name: "Default application" },
-    { id: WINDOWS_FILE_EXPLORER_APP_ID, name: "Windows file explorer" },
-  ];
+  const builtIns = [{ id: "__default__", name: "Default application" }];
   if (isImage) {
     builtIns.push({
       id: "__paint__",

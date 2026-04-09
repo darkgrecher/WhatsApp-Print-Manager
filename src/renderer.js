@@ -31,6 +31,7 @@ const AUTO_REFRESH_INTERVAL = 10000; // 10 seconds
 const EXPLORER_SELECTION_SYNC_DEBOUNCE_MS = 120;
 let explorerSelectionSyncTimer = null;
 let lastExplorerSelectionSyncKey = null;
+const WINDOWS_FILE_EXPLORER_APP_ID = "__windows_file_explorer__";
 
 function getSingleTypeFromSet(typeSet) {
   return typeSet && typeSet.size === 1 ? Array.from(typeSet)[0] : null;
@@ -154,6 +155,15 @@ function setupButtonListeners() {
 
   const btnDelete = document.getElementById("btn-delete");
   if (btnDelete) btnDelete.addEventListener("click", () => deleteSelected());
+
+  const btnOpenSelectedExplorer = document.getElementById(
+    "btn-open-selected-explorer",
+  );
+  if (btnOpenSelectedExplorer) {
+    btnOpenSelectedExplorer.addEventListener("click", () =>
+      openSelectedInExplorer(),
+    );
+  }
 
   // Sidebar initial refresh button
   const btnSidebarRefresh = document.getElementById("btn-sidebar-refresh");
@@ -1900,6 +1910,13 @@ function updateSelectionUI() {
     openWithContainer.classList.toggle("hidden", selectedFiles.size === 0);
   }
 
+  const btnOpenSelectedExplorer = document.getElementById(
+    "btn-open-selected-explorer",
+  );
+  if (btnOpenSelectedExplorer) {
+    btnOpenSelectedExplorer.classList.toggle("hidden", selectedFiles.size === 0);
+  }
+
   updateOpenSelectedButtonLabel();
   queueExplorerSelectionSync();
 }
@@ -2009,9 +2026,13 @@ function renderOpenWithDropdown(apps, selectedType) {
   const dropdown = document.getElementById("open-with-dropdown");
   if (!dropdown) return;
 
+  const visibleApps = (Array.isArray(apps) ? apps : []).filter(
+    (app) => app && app.id !== WINDOWS_FILE_EXPLORER_APP_ID,
+  );
+
   dropdown.innerHTML = "";
 
-  apps.forEach((app) => {
+  visibleApps.forEach((app) => {
     const option = document.createElement("button");
     option.type = "button";
     option.className = "open-with-option";
@@ -2033,6 +2054,34 @@ function renderOpenWithDropdown(apps, selectedType) {
   });
 
   dropdown.classList.remove("hidden");
+}
+
+async function openSelectedInExplorer() {
+  if (selectedFiles.size === 0) {
+    showToast("No downloaded files selected", "warning");
+    return;
+  }
+
+  const { filePaths } = getSelectedOpenableFiles();
+  const normalizedFilePaths = [...new Set(filePaths.filter(Boolean))];
+  if (normalizedFilePaths.length === 0) {
+    showToast("No downloaded files selected to open", "warning");
+    return;
+  }
+
+  hideOpenWithDropdown();
+
+  const openResult = await window.api.openFilesWithApp({
+    appId: WINDOWS_FILE_EXPLORER_APP_ID,
+    filePaths: normalizedFilePaths,
+  });
+
+  if (openResult && openResult.error) {
+    showToast(`Open failed: ${openResult.error}`, "error");
+    return;
+  }
+
+  showToast("Opened selected files in temp folder", "success");
 }
 
 async function toggleOpenWithDropdown(event) {
