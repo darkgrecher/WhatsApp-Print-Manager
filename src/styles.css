@@ -633,7 +633,7 @@ body {
 .files-header-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-shrink: 0;
 }
 
@@ -726,18 +726,20 @@ body {
 
 /* WhatsApp styled header buttons */
 .files-header .btn {
-  background: var(--bg-white);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-color);
+  background: #ffffff;
+  color: #4a5c66;
+  border: 1px solid #cfd9de;
   border-radius: 20px;
-  font-weight: 500;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-  padding: 6px 14px;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  padding: 8px 14px;
+  min-height: 36px;
 }
 
 .files-header .btn:hover:not(:disabled) {
-  background: #f5f6f6;
-  color: var(--text-primary);
+  background: #f0f4f7;
+  border-color: #b9c8cf;
+  color: #233138;
 }
 
 .files-header #btn-delete {
@@ -757,6 +759,9 @@ body {
   display: inline-flex;
   align-items: stretch;
   gap: 0;
+  width: 236px;
+  min-width: 236px;
+  max-width: 236px;
   border-radius: 20px;
   overflow: visible;
   border: 1px solid var(--wa-green);
@@ -785,6 +790,7 @@ body {
 .files-header .open-with-container .btn {
   color: white;
   background: transparent;
+  min-height: 38px;
 }
 
 .files-header .open-with-container .btn:hover:not(:disabled) {
@@ -793,7 +799,15 @@ body {
 }
 
 #btn-open-selected {
-  max-width: 320px;
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 0;
+  display: block;
+  box-sizing: border-box;
+  text-align: left;
+  padding: 0 12px;
+  line-height: 38px;
+  max-width: none;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -801,13 +815,19 @@ body {
 }
 
 .btn-open-with-menu {
-  width: 34px;
-  min-width: 34px;
-  height: 30px;
+  width: 46px;
+  min-width: 46px;
+  height: 38px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
+}
+
+.btn-open-with-menu svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.4;
 }
 
 .open-with-dropdown {

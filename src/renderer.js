@@ -2024,7 +2024,6 @@ async function syncExplorerSelectionFolder(showErrorToast = false) {
     }
   }
 }
-
 function updateOpenSelectedButtonLabel() {
   const btnOpenSelected = document.getElementById("btn-open-selected");
   if (!btnOpenSelected) return;
@@ -2033,7 +2032,9 @@ function updateOpenSelectedButtonLabel() {
   if (selectedType) {
     selectedOpenWithApp = getOpenWithPreferenceForType(selectedType);
   }
-  btnOpenSelected.textContent = `Open with ${selectedOpenWithApp.name}`;
+  const fullAppName = selectedOpenWithApp.name || "Default application";
+  btnOpenSelected.textContent = `Open with ${fullAppName}`;
+  btnOpenSelected.title = `Open with ${fullAppName}`;
 }
 
 function hideOpenWithDropdown() {
