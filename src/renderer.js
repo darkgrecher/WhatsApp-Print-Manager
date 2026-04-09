@@ -1914,7 +1914,10 @@ function updateSelectionUI() {
     "btn-open-selected-explorer",
   );
   if (btnOpenSelectedExplorer) {
-    btnOpenSelectedExplorer.classList.toggle("hidden", selectedFiles.size === 0);
+    btnOpenSelectedExplorer.classList.toggle(
+      "hidden",
+      selectedFiles.size === 0,
+    );
   }
 
   updateOpenSelectedButtonLabel();
