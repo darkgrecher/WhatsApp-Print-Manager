@@ -58,6 +58,20 @@ function setOpenWithPreferenceForType(fileType, app) {
   });
 }
 
+function setFileSearchExpanded(expanded, options = {}) {
+  const { focusInput = false } = options;
+  const container = document.getElementById("file-search-toggle-container");
+  const fileSearch = document.getElementById("file-search");
+
+  if (!container) return;
+
+  container.classList.toggle("expanded", !!expanded);
+
+  if (expanded && focusInput && fileSearch) {
+    setTimeout(() => fileSearch.focus(), 0);
+  }
+}
+
 // ── Initialization ───────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   setupEventListeners();
@@ -134,6 +148,20 @@ function setupButtonListeners() {
     if (openWithContainer && !openWithContainer.contains(e.target)) {
       hideOpenWithDropdown();
     }
+
+    const fileSearchToggleContainer = document.getElementById(
+      "file-search-toggle-container",
+    );
+    const fileSearch = document.getElementById("file-search");
+    if (
+      fileSearchToggleContainer &&
+      !fileSearchToggleContainer.contains(e.target)
+    ) {
+      const hasQuery = !!(fileSearch && fileSearch.value.trim().length);
+      if (!hasQuery) {
+        setFileSearchExpanded(false);
+      }
+    }
   });
 
   // File action buttons
@@ -165,6 +193,16 @@ function setupButtonListeners() {
     );
   }
 
+  const btnFileSearchToggle = document.getElementById("btn-file-search-toggle");
+  if (btnFileSearchToggle) {
+    btnFileSearchToggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const container = document.getElementById("file-search-toggle-container");
+      const isExpanded = container?.classList.contains("expanded");
+      setFileSearchExpanded(!isExpanded, { focusInput: !isExpanded });
+    });
+  }
+
   // Sidebar initial refresh button
   const btnSidebarRefresh = document.getElementById("btn-sidebar-refresh");
   if (btnSidebarRefresh)
@@ -190,9 +228,15 @@ function setupButtonListeners() {
   const fileSearch = document.getElementById("file-search");
   const fileSearchClear = document.getElementById("file-search-clear");
   if (fileSearch) {
+    fileSearch.addEventListener("focus", () => setFileSearchExpanded(true));
     fileSearch.addEventListener("input", () => {
       filterFiles(fileSearch.value);
       fileSearchClear.classList.toggle("hidden", fileSearch.value.length === 0);
+    });
+    fileSearch.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && fileSearch.value.length === 0) {
+        setFileSearchExpanded(false);
+      }
     });
   }
   if (fileSearchClear) {
@@ -200,6 +244,7 @@ function setupButtonListeners() {
       fileSearch.value = "";
       fileSearchClear.classList.add("hidden");
       filterFiles("");
+      fileSearch.focus();
     });
   }
 
@@ -1250,6 +1295,7 @@ async function selectChat(chatId, chatName, options = {}) {
   const fileSearchClear = document.getElementById("file-search-clear");
   if (fileSearch) fileSearch.value = "";
   if (fileSearchClear) fileSearchClear.classList.add("hidden");
+  setFileSearchExpanded(false);
 
   // Highlight active chat
   document.querySelectorAll(".chat-item").forEach((el) => {

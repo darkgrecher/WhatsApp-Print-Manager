@@ -410,24 +410,7 @@ body {
 }
 
 .files-search-container {
-  display: flex;
-  justify-content: center;
-  max-width: 320px;
-  min-width: 160px;
-  width: 100%;
-}
-
-.search-bar-files {
-  background: var(--bg-white);
-  border-radius: 20px;
-  padding: 0 14px;
-  height: 36px;
-  width: 100%;
-}
-
-.search-bar-files .search-input {
-  padding: 8px 0;
-  font-size: 13px;
+  display: none;
 }
 
 .no-search-results {
@@ -652,6 +635,90 @@ body {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.file-search-toggle-container {
+  display: inline-flex;
+  align-items: center;
+}
+
+.file-search-inline {
+  width: 0;
+  opacity: 0;
+  overflow: hidden;
+  margin-right: 0;
+  pointer-events: none;
+  transition: width 0.2s ease, opacity 0.2s ease, margin-right 0.2s ease;
+}
+
+.file-search-toggle-container.expanded .file-search-inline {
+  width: min(240px, 40vw);
+  opacity: 1;
+  margin-right: 8px;
+  pointer-events: auto;
+}
+
+.search-bar-files-inline {
+  background: #ffffff;
+  border-radius: 20px;
+  border: 1px solid #cde5d8;
+  padding: 0 12px;
+  height: 32px;
+  width: 100%;
+  box-shadow: 0 1px 2px rgba(7, 94, 84, 0.08);
+}
+
+.search-bar-files-inline:focus-within {
+  border-color: var(--wa-green);
+  box-shadow: 0 0 0 2px rgba(37, 211, 102, 0.2);
+}
+
+.search-bar-files-inline-icon {
+  color: #6b7b83;
+  flex-shrink: 0;
+}
+
+.search-bar-files-inline:focus-within .search-bar-files-inline-icon {
+  color: var(--wa-green-dark);
+}
+
+.search-bar-files-inline .search-input {
+  padding: 6px 0;
+  font-size: 13px;
+  color: #111b21;
+}
+
+.search-bar-files-inline .search-input::placeholder {
+  color: #7f929b;
+}
+
+.files-header .btn.btn-file-search-toggle {
+  width: 34px;
+  min-width: 34px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #e8f7ef;
+  border-color: #bfe6d0;
+  color: var(--wa-green-dark);
+}
+
+.files-header .btn.btn-file-search-toggle:hover:not(:disabled) {
+  background: #dcf8c6;
+  border-color: #97d8b5;
+  color: var(--wa-teal);
+}
+
+.files-header .btn.btn-file-search-toggle .search-toggle-icon {
+  filter: drop-shadow(0 0 0.2px currentColor);
+}
+
+.file-search-toggle-container.expanded .btn.btn-file-search-toggle {
+  background: #d5f4e6;
+  border-color: var(--wa-green);
+  color: var(--wa-teal);
 }
 
 /* WhatsApp styled header buttons */
