@@ -648,7 +648,10 @@ body {
   overflow: hidden;
   margin-right: 0;
   pointer-events: none;
-  transition: width 0.2s ease, opacity 0.2s ease, margin-right 0.2s ease;
+  transition:
+    width 0.2s ease,
+    opacity 0.2s ease,
+    margin-right 0.2s ease;
 }
 
 .file-search-toggle-container.expanded .file-search-inline {
