@@ -1889,35 +1889,6 @@ function toggleFileSelect(messageId) {
   const fileToSelect = currentFiles.find((f) => f.messageId === messageId);
   if (!fileToSelect) return;
 
-  if (!selectedFiles.has(messageId)) {
-    // We are adding. Check if it matches existing selection types.
-    if (selectedFiles.size > 0) {
-      const firstSelectedId = Array.from(selectedFiles)[0];
-      const firstFile = currentFiles.find(
-        (f) => f.messageId === firstSelectedId,
-      );
-      if (firstFile) {
-        const firstType = getFileType(firstFile.fileName);
-        const currentType = getFileType(fileToSelect.fileName);
-        if (firstType !== currentType) {
-          showToast(
-            `Please select only files of the same type (${firstType.toUpperCase()})`,
-            "warning",
-          );
-          // Revert checkbox if it was toggled
-          const el = document.getElementById(
-            `file-${messageId.replace(/[^a-zA-Z0-9]/g, "_")}`,
-          );
-          if (el) {
-            const checkbox = el.querySelector(".file-checkbox");
-            if (checkbox) checkbox.checked = false;
-          }
-          return;
-        }
-      }
-    }
-  }
-
   if (selectedFiles.has(messageId)) {
     selectedFiles.delete(messageId);
   } else {
@@ -1954,6 +1925,32 @@ function updateSelectionUI() {
   const openWithContainer = document.getElementById("open-with-container");
   if (openWithContainer) {
     openWithContainer.classList.toggle("hidden", selectedFiles.size === 0);
+  }
+
+  const { selectedTypes } = getSelectedOpenableFiles();
+  const hasMixedTypes = selectedTypes.size > 1;
+  const disableOpenWithActions = selectedFiles.size === 0 || hasMixedTypes;
+
+  const btnOpenSelected = document.getElementById("btn-open-selected");
+  if (btnOpenSelected) {
+    btnOpenSelected.disabled = disableOpenWithActions;
+    if (hasMixedTypes) {
+      btnOpenSelected.title = "Open With is available only for single file type selections";
+    }
+  }
+
+  const btnOpenWithMenu = document.getElementById("btn-open-with-menu");
+  if (btnOpenWithMenu) {
+    btnOpenWithMenu.disabled = disableOpenWithActions;
+    if (hasMixedTypes) {
+      btnOpenWithMenu.title = "Choose application is available only for single file type selections";
+    } else {
+      btnOpenWithMenu.title = "Choose application";
+    }
+  }
+
+  if (disableOpenWithActions) {
+    hideOpenWithDropdown();
   }
 
   const btnOpenSelectedExplorer = document.getElementById(
@@ -2028,6 +2025,10 @@ function updateOpenSelectedButtonLabel() {
   const btnOpenSelected = document.getElementById("btn-open-selected");
   if (!btnOpenSelected) return;
   const { selectedTypes } = getSelectedOpenableFiles();
+  if (selectedTypes.size > 1) {
+    btnOpenSelected.textContent = "Open with Default application";
+    return;
+  }
   const selectedType = getSingleTypeFromSet(selectedTypes);
   if (selectedType) {
     selectedOpenWithApp = getOpenWithPreferenceForType(selectedType);
@@ -2157,7 +2158,6 @@ async function toggleOpenWithDropdown(event) {
   }
 
   if (selectedTypes.size > 1) {
-    showToast("Only files of one type can be opened", "warning");
     return;
   }
 
