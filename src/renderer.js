@@ -1935,7 +1935,8 @@ function updateSelectionUI() {
   if (btnOpenSelected) {
     btnOpenSelected.disabled = disableOpenWithActions;
     if (hasMixedTypes) {
-      btnOpenSelected.title = "Open With is available only for single file type selections";
+      btnOpenSelected.title =
+        "Open With is available only for single file type selections";
     }
   }
 
@@ -1943,7 +1944,8 @@ function updateSelectionUI() {
   if (btnOpenWithMenu) {
     btnOpenWithMenu.disabled = disableOpenWithActions;
     if (hasMixedTypes) {
-      btnOpenWithMenu.title = "Choose application is available only for single file type selections";
+      btnOpenWithMenu.title =
+        "Choose application is available only for single file type selections";
     } else {
       btnOpenWithMenu.title = "Choose application";
     }
