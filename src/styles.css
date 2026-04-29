@@ -754,6 +754,19 @@ body {
   border-color: #b91c1c;
 }
 
+.files-header #btn-open-selected-explorer {
+  background: var(--wa-green);
+  color: white;
+  border-color: #1da851;
+  box-shadow: 0 6px 14px rgba(37, 211, 102, 0.25);
+}
+
+.files-header #btn-open-selected-explorer:hover:not(:disabled) {
+  background: #1da851;
+  border-color: #178d45;
+  color: white;
+}
+
 .open-with-container {
   position: relative;
   display: inline-flex;
