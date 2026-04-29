@@ -886,7 +886,7 @@ async function requestTrialVersion() {
 
     if (result.success) {
       showToast(result.message || "Trial request submitted!", "info");
-      showLicenseScreen("pending");
+      await recheckLicense();
     } else {
       showToast(result.message || "Failed to submit request", "error");
       if (btn) {
