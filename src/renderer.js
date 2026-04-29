@@ -15,7 +15,6 @@ const dragSelectionState = {
   active: false,
   hasMoved: false,
   anchorMessageId: null,
-  anchorType: null,
   lastHoverMessageId: null,
   startX: 0,
   startY: 0,
@@ -1661,7 +1660,7 @@ function applySelectionFromMessageIds(messageIds) {
   updateSelectionUI();
 }
 
-function getDragTypeFilteredRange(anchorMessageId, hoverMessageId, anchorType) {
+function getDragRange(anchorMessageId, hoverMessageId) {
   const orderedItems = getVisibleFileItemsInOrder();
   const startIndex = orderedItems.findIndex(
     (el) => el.dataset.messageId === anchorMessageId,
@@ -1679,10 +1678,7 @@ function getDragTypeFilteredRange(anchorMessageId, hoverMessageId, anchorType) {
   for (let i = min; i <= max; i++) {
     const msgId = orderedItems[i].dataset.messageId;
     if (!msgId) continue;
-    const type = getFileTypeByMessageId(msgId);
-    if (type === anchorType) {
-      selectedIds.push(msgId);
-    }
+    selectedIds.push(msgId);
   }
 
   return selectedIds;
@@ -1697,10 +1693,9 @@ function updateDragSelectionToElement(fileItemEl) {
   if (dragSelectionState.lastHoverMessageId === hoverMessageId) return;
   dragSelectionState.lastHoverMessageId = hoverMessageId;
 
-  const selectedIds = getDragTypeFilteredRange(
+  const selectedIds = getDragRange(
     dragSelectionState.anchorMessageId,
     hoverMessageId,
-    dragSelectionState.anchorType,
   );
   applySelectionFromMessageIds(selectedIds);
 }
@@ -1720,13 +1715,9 @@ function handleFileListMouseDown(event) {
   const messageId = fileItemEl.dataset.messageId;
   if (!messageId) return;
 
-  const anchorType = getFileTypeByMessageId(messageId);
-  if (!anchorType) return;
-
   dragSelectionState.active = true;
   dragSelectionState.hasMoved = false;
   dragSelectionState.anchorMessageId = messageId;
-  dragSelectionState.anchorType = anchorType;
   dragSelectionState.lastHoverMessageId = messageId;
   dragSelectionState.startX = event.clientX;
   dragSelectionState.startY = event.clientY;
@@ -1767,7 +1758,6 @@ function finishDragSelection() {
   dragSelectionState.active = false;
   dragSelectionState.hasMoved = false;
   dragSelectionState.anchorMessageId = null;
-  dragSelectionState.anchorType = null;
   dragSelectionState.lastHoverMessageId = null;
 
   if (shouldAutoClearSuppression) {
